@@ -12,6 +12,7 @@ import { productivityRoutes } from './routes/productivity'
 import { moodRoutes } from './routes/mood'
 import { ecoRoutes } from './routes/eco'
 import { scoreRoutes } from './routes/score'
+import { aiRoutes } from './routes/ai'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -24,37 +25,28 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   })
 
-  // ── Security headers ──────────────────────────────────────────────────────
   await app.register(helmet, { global: true })
 
-  // ── CORS ──────────────────────────────────────────────────────────────────
   await app.register(cors, {
     origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
 
-  // ── Global rate limit ─────────────────────────────────────────────────────
   await app.register(rateLimit, {
     global: true,
     max: 100,
     timeWindow: '1 minute',
     errorResponseBuilder: () => ({
       success: false,
-      error: {
-        code: 'RATE_LIMITED',
-        message: 'Too many requests — please slow down.',
-      },
+      error: { code: 'RATE_LIMITED', message: 'Too many requests — please slow down.' },
     }),
   })
 
-  // ── Global error handler ──────────────────────────────────────────────────
   app.setErrorHandler(errorHandler)
 
-  // ── Health check ──────────────────────────────────────────────────────────
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
-  // ── Routes ────────────────────────────────────────────────────────────────
   await app.register(authRoutes, { prefix: '/api/auth' })
   await app.register(userRoutes, { prefix: '/api/user' })
   await app.register(physicalRoutes, { prefix: '/api/activity/physical' })
@@ -63,6 +55,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(moodRoutes, { prefix: '/api/mood' })
   await app.register(ecoRoutes, { prefix: '/api/eco' })
   await app.register(scoreRoutes, { prefix: '/api/score' })
+  await app.register(aiRoutes, { prefix: '/api/ai' })
 
   return app
 }
