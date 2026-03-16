@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String
+  passwordHash String?
+  googleId     String? @unique
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  preferences          UserPreferences?
+  physicalEntries      PhysicalActivityEntry[]
+  digitalEntries       DigitalUsageEntry[]
+  productivitySessions ProductivitySession[]
+  moodLogs             MoodLog[]
+  ecoActions           EcoAction[]
+  dailySummaries       DailySummary[]
+  refreshTokens        RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+}
+
+model UserPreferences {
+  id                   String  @id @default(cuid())
+  userId               String  @unique
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme                String  @default("dark")
+  units                String  @default("metric")
+  notificationsEnabled Boolean @default(true)
+  focusMode            Boolean @default(false)
+}
+
+model PhysicalActivityEntry {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps        Int      @default(0)
+  distanceKm   Float    @default(0)
+  caloriesKcal Int      @default(0)
+  sleepMinutes Int      @default(0)
+  timestamp    DateTime @default(now())
+}
+
+model DigitalUsageEntry {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  screenTimeMinutes Int
+  categoryBreakdown Json     @default("{}")
+  date              DateTime @default(now())
+}
+
+model ProductivitySession {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String
+  label       String?
+  startedAt   DateTime
+  endedAt     DateTime
+  durationSec Int
+}
+
+model MoodLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji       String
+  stressScore Int
+  note        String?
+  timestamp   DateTime @default(now())
+}
+
+model EcoAction {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String
+  type        String
+  impactKgCO2 Float
+  timestamp   DateTime @default(now())
+}
+
+model DailySummary {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date              DateTime
+  insightText       String?
+  physicalScore     Float?
+  digitalScore      Float?
+  productivityScore Float?
+  moodScore         Float?
+  ecoScore          Float?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([userId, date])
+}
