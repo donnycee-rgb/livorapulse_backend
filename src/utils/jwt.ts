@@ -13,13 +13,13 @@ function requireSecret(name: string): string {
 
 export function signAccessToken(payload: TokenPayload): string {
   return jwt.sign(payload, requireSecret('JWT_ACCESS_SECRET'), {
-    expiresIn: (process.env.JWT_ACCESS_EXPIRES_IN ?? '15m') as string,
+    expiresIn: (process.env.JWT_ACCESS_EXPIRES_IN ?? '15m') as unknown as number,
   })
 }
 
 export function signRefreshToken(payload: TokenPayload): string {
   return jwt.sign(payload, requireSecret('JWT_REFRESH_SECRET'), {
-    expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') as string,
+    expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') as unknown as number,
   })
 }
 
@@ -39,7 +39,6 @@ export function parseDurationToDate(duration: string): Date {
   const now = new Date()
   const match = /^(\d+)([smhd])$/.exec(duration)
   if (!match) {
-    // Default: 30 days
     now.setDate(now.getDate() + 30)
     return now
   }

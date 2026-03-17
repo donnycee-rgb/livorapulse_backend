@@ -1,17 +1,18 @@
 import { Queue } from 'bullmq'
-import { createRedisConnection } from '../db/redis'
 
-// Each queue uses its own dedicated Redis connection (BullMQ requirement)
-const dailySummaryConnection = createRedisConnection()
-const streaksConnection = createRedisConnection()
+if (!process.env.REDIS_URL) {
+  throw new Error('REDIS_URL environment variable is not set')
+}
+
+// Pass the URL string directly — avoids ioredis version conflicts between
+// the top-level ioredis and BullMQ's bundled ioredis
+const connection = { url: process.env.REDIS_URL }
 
 /**
  * Queue for nightly per-user daily score computation.
- * A repeatable dispatcher job fires at midnight UTC and enqueues
- * individual { userId, date } jobs for every user.
  */
 export const dailySummaryQueue = new Queue('daily-summary', {
-  connection: dailySummaryConnection,
+  connection,
   defaultJobOptions: {
     removeOnComplete: 100,
     removeOnFail: 50,
@@ -22,7 +23,7 @@ export const dailySummaryQueue = new Queue('daily-summary', {
  * Queue for hourly streak tracking across all users.
  */
 export const streaksQueue = new Queue('streaks', {
-  connection: streaksConnection,
+  connection,
   defaultJobOptions: {
     removeOnComplete: 50,
     removeOnFail: 20,
@@ -31,19 +32,18 @@ export const streaksQueue = new Queue('streaks', {
 
 /**
  * Register the repeatable cron jobs.
- * Call once at server startup — BullMQ is idempotent for repeatable jobs
- * (adding the same job with the same key is a no-op).
+ * BullMQ v5 uses `pattern` instead of `cron` in RepeatOptions.
  */
 export async function registerRepeatableJobs(): Promise<void> {
   await dailySummaryQueue.add(
     'dispatch-daily-summaries',
     {},
-    { repeat: { cron: '0 0 * * *' }, jobId: 'nightly-daily-summary' },
+    { repeat: { pattern: '0 0 * * *' }, jobId: 'nightly-daily-summary' },
   )
 
   await streaksQueue.add(
     'update-all-streaks',
     {},
-    { repeat: { cron: '0 * * * *' }, jobId: 'hourly-streaks' },
+    { repeat: { pattern: '0 * * * *' }, jobId: 'hourly-streaks' },
   )
 }

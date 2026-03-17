@@ -1,5 +1,4 @@
 import { Worker, Job } from 'bullmq'
-import { createRedisConnection } from '../../db/redis'
 import { prisma } from '../../db/prisma'
 import { dailySummaryQueue } from '../queue'
 import { computeDailyScore } from '../../services/ScoreService'
@@ -19,7 +18,8 @@ type DailySummaryJobData = DispatchJob | UserSummaryJob
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
-const workerConnection = createRedisConnection()
+// Use URL string for BullMQ — avoids ioredis version conflict
+const workerConnection = { url: process.env.REDIS_URL as string }
 
 export const dailySummaryWorker = new Worker<DailySummaryJobData>(
   'daily-summary',

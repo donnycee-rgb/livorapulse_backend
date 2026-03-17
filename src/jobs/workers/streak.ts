@@ -1,17 +1,9 @@
 import { Worker } from 'bullmq'
-import { createRedisConnection } from '../../db/redis'
 import { redis } from '../../db/redis'
 import { prisma } from '../../db/prisma'
 
-/**
- * For each user, checks whether they have logged ANY entry today across all
- * five tracker tables. Increments the streak counter in Redis if they have,
- * or resets it to 0 if they missed yesterday.
- *
- * Redis key: streak:<userId>  (integer, no TTL — persists until reset)
- */
-
-const workerConnection = createRedisConnection()
+// Use URL string for BullMQ — avoids ioredis version conflict
+const workerConnection = { url: process.env.REDIS_URL as string }
 
 async function hasActivityToday(userId: string): Promise<boolean> {
   const todayStart = new Date()
@@ -67,19 +59,15 @@ export const streakWorker = new Worker(
 
       if (activeToday) {
         const currentStreak = parseInt((await redis.get(key)) ?? '0', 10)
-        // Only increment once per day — check if streak was already counted today
-        // by using a daily marker key
         const markerKey = `streak_marked:${user.id}:${new Date().toISOString().slice(0, 10)}`
         const alreadyMarked = await redis.exists(markerKey)
         if (!alreadyMarked) {
           const keptStreak = await hadActivityYesterday(user.id)
           const newStreak = keptStreak ? currentStreak + 1 : 1
           await redis.set(key, newStreak)
-          // Marker expires at end of today (UTC)
           await redis.set(markerKey, '1', 'EX', 86400)
         }
       } else {
-        // If user missed yesterday and hasn't logged today, reset streak
         const keptYesterday = await hadActivityYesterday(user.id)
         if (!keptYesterday) {
           await redis.set(key, 0)
