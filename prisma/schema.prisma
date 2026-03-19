@@ -55,6 +55,8 @@ model PhysicalActivityEntry {
   distanceKm   Float    @default(0)
   caloriesKcal Int      @default(0)
   sleepMinutes Int      @default(0)
+  trail        Json?
+  note         String?
   timestamp    DateTime @default(now())
 }
 

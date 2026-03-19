@@ -18,6 +18,8 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
         distanceKm: body.distanceKm,
         caloriesKcal: body.caloriesKcal,
         sleepMinutes: body.sleepMinutes,
+        note: body.note ?? null,
+        trail: body.trail ? body.trail : undefined,
         ...(body.timestamp ? { timestamp: new Date(body.timestamp) } : {}),
       },
       select: {
@@ -26,6 +28,8 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
         distanceKm: true,
         caloriesKcal: true,
         sleepMinutes: true,
+        note: true,
+        trail: true,
         timestamp: true,
       },
     })
@@ -46,6 +50,8 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
           distanceKm: true,
           caloriesKcal: true,
           sleepMinutes: true,
+          note: true,
+          trail: true,
           timestamp: true,
         },
       }),
