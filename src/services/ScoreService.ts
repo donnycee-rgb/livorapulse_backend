@@ -17,6 +17,28 @@ export interface DailyScoreResult {
   components: ScoreComponents
 }
 
+// ─── Default goals — used when user has no profile yet ───────────────────────
+
+const DEFAULT_GOALS = {
+  goalStepsPerDay: 8000,
+  goalSleepHours: 8,
+  goalScreenMinutes: 240,
+  goalFocusMinutes: 120,
+  goalEcoActionsPerDay: 3,
+  goalSocialMinutes: 60,
+  goalEntertainmentMinutes: 90,
+}
+
+// ─── Streak multiplier — mirrors frontend selectors.ts ───────────────────────
+
+function getStreakMultiplier(streak: number): number {
+  if (streak >= 60) return 1.50
+  if (streak >= 30) return 1.35
+  if (streak >= 14) return 1.20
+  if (streak >= 7)  return 1.10
+  return 1.00
+}
+
 // ─── Day boundary helpers ─────────────────────────────────────────────────────
 
 function dayBounds(date: Date): { start: Date; end: Date } {
@@ -27,66 +49,91 @@ function dayBounds(date: Date): { start: Date; end: Date } {
   return { start, end }
 }
 
-// ─── Component score calculations ────────────────────────────────────────────
-
-function physicalScore(steps: number, sleepMinutes: number): number {
-  let stepsScore: number
-  if (steps >= 10000) stepsScore = 100
-  else if (steps >= 7500) stepsScore = 80
-  else if (steps >= 5000) stepsScore = 60
-  else if (steps >= 2500) stepsScore = 40
-  else stepsScore = 20
-
-  let sleepScore: number
-  if (sleepMinutes >= 480) sleepScore = 100
-  else if (sleepMinutes >= 420) sleepScore = 80
-  else if (sleepMinutes >= 360) sleepScore = 60
-  else sleepScore = 40
-
-  return stepsScore * 0.6 + sleepScore * 0.4
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
 }
 
-function digitalScore(screenTimeMinutes: number): number {
-  if (screenTimeMinutes <= 120) return 100
-  if (screenTimeMinutes <= 240) return 80
-  if (screenTimeMinutes <= 360) return 60
-  if (screenTimeMinutes <= 480) return 40
-  return 20
+// ─── Component score calculations — all personalised ────────────────────────
+
+function physicalScore(
+  steps: number,
+  sleepMinutes: number,
+  goalSteps: number,
+  goalSleepHours: number,
+): number {
+  const stepsScore = clamp((steps / goalSteps) * 100, 0, 100)
+  const sleepScore = clamp((sleepMinutes / (goalSleepHours * 60)) * 100, 0, 100)
+  return stepsScore * 0.7 + sleepScore * 0.3
 }
 
-function productivityScore(totalFocusSec: number): number {
-  const hours = totalFocusSec / 3600
-  if (hours >= 4) return 100
-  if (hours >= 3) return 85
-  if (hours >= 2) return 70
-  if (hours >= 1) return 50
-  return 25
+function digitalScore(
+  socialMinutes: number,
+  entertainmentMinutes: number,
+  productiveMinutes: number,
+  goalSocialMinutes: number,
+  goalEntertainmentMinutes: number,
+  goalFocusMinutes: number,
+): number {
+  // Productive screen time — no penalty, boosts productivity instead
+  // Social — penalised only beyond the personal limit
+  const socialPenalty = socialMinutes > goalSocialMinutes
+    ? clamp(((socialMinutes - goalSocialMinutes) / goalSocialMinutes) * 50, 0, 50)
+    : 0
+
+  // Entertainment — penalised only beyond the personal limit
+  const entertainPenalty = entertainmentMinutes > goalEntertainmentMinutes
+    ? clamp(((entertainmentMinutes - goalEntertainmentMinutes) / goalEntertainmentMinutes) * 50, 0, 50)
+    : 0
+
+  return clamp(100 - socialPenalty - entertainPenalty, 0, 100)
+}
+
+function productivityScore(
+  totalFocusSec: number,
+  productiveScreenMinutes: number,
+  goalFocusMinutes: number,
+): number {
+  const focusMin = totalFocusSec / 60
+
+  // Productive screen time contributes up to 30% of the focus goal
+  const productiveBonus = clamp((productiveScreenMinutes / goalFocusMinutes) * 30, 0, 30)
+  const focusContribution = clamp((focusMin / goalFocusMinutes) * 100, 0, 100)
+
+  return clamp(focusContribution * 0.7 + productiveBonus * 0.3, 0, 100)
 }
 
 function moodScore(avgStress: number): number {
   const raw = (10 - avgStress) * 10 + 10
-  return Math.max(0, Math.min(100, raw))
+  return clamp(raw, 0, 100)
 }
 
-function ecoScore(actionCount: number): number {
-  if (actionCount === 0) return 40
-  if (actionCount === 1) return 60
-  if (actionCount === 2) return 75
-  if (actionCount === 3) return 88
-  return 100
+function ecoScore(actionCount: number, goalEcoActions: number): number {
+  return clamp((actionCount / goalEcoActions) * 100, 0, 100)
 }
 
-function buildInsight(components: ScoreComponents): string {
+function buildInsight(
+  components: ScoreComponents,
+  goals: typeof DEFAULT_GOALS,
+  streak: number,
+): string {
   const entries = Object.entries(components) as [keyof ScoreComponents, number][]
   const [lowest] = entries.reduce((a, b) => (a[1] <= b[1] ? a : b))
 
   const messages: Record<keyof ScoreComponents, string> = {
-    physical: 'Try to hit 10,000 steps today to boost your physical score.',
-    digital: 'Consider reducing screen time — your eyes and mind will thank you.',
-    productivity: 'Even one focused 25-minute session can improve your productivity score.',
-    mood: 'Your stress levels look high — try a short breathing exercise.',
+    physical: `Try to hit ${goals.goalStepsPerDay.toLocaleString()} steps today to boost your physical score.`,
+    digital: 'Your social or entertainment screen time is high — try staying within your personal limits.',
+    productivity: `Even one focused session can help you reach your ${goals.goalFocusMinutes}-minute focus goal.`,
+    mood: 'Your stress levels look high — try a short breathing exercise or a walk.',
     eco: 'Log an eco action today to improve your sustainability score.',
   }
+
+  if (streak >= 7) {
+    const [highest] = entries.reduce((a, b) => (a[1] >= b[1] ? a : b))
+    if (components[highest] >= 80) {
+      return `${streak}-day streak! Your ${highest} score is strong — keep it going.`
+    }
+  }
+
   return messages[lowest]
 }
 
@@ -98,14 +145,15 @@ export async function computeDailyScore(
 ): Promise<DailyScoreResult> {
   const { start, end } = dayBounds(date)
 
-  const [physical, digital, productivity, mood, eco] = await Promise.all([
+  // Fetch all data in parallel — including user profile for personal goals
+  const [physical, digital, productivity, mood, eco, profile, streakRaw] = await Promise.all([
     prisma.physicalActivityEntry.findMany({
       where: { userId, timestamp: { gte: start, lte: end } },
       select: { steps: true, sleepMinutes: true },
     }),
     prisma.digitalUsageEntry.findMany({
       where: { userId, date: { gte: start, lte: end } },
-      select: { screenTimeMinutes: true },
+      select: { screenTimeMinutes: true, categoryBreakdown: true },
     }),
     prisma.productivitySession.findMany({
       where: { userId, startedAt: { gte: start, lte: end } },
@@ -119,44 +167,105 @@ export async function computeDailyScore(
       where: { userId, timestamp: { gte: start, lte: end } },
       select: { id: true },
     }),
+    prisma.userProfile.findUnique({
+      where: { userId },
+      select: {
+        goalStepsPerDay: true,
+        goalSleepHours: true,
+        goalScreenMinutes: true,
+        goalFocusMinutes: true,
+        goalEcoActionsPerDay: true,
+        goalSocialMinutes: true,
+        goalEntertainmentMinutes: true,
+      },
+    }),
+    // Get streak from Redis if available — fall back to 0
+    import('../db/redis').then(({ redis }) =>
+      redis.get(`streak:${userId}`).catch(() => null)
+    ).catch(() => null),
   ])
 
-  // Aggregate raw values
-  const totalSteps = physical.reduce((s, e) => s + e.steps, 0)
-  const totalSleep = physical.reduce((s, e) => s + e.sleepMinutes, 0)
-  const totalScreen = digital.reduce((s, e) => s + e.screenTimeMinutes, 0)
-  const totalFocusSec = productivity.reduce((s, e) => s + e.durationSec, 0)
-  const avgStress =
-    mood.length > 0
-      ? mood.reduce((s, e) => s + e.stressScore, 0) / mood.length
-      : 5 // neutral default when no logs
-  const ecoCount = eco.length
+  // ── Personal goals with streak progression ──────────────────────────────
+  const streak = streakRaw ? parseInt(String(streakRaw), 10) : 0
+  const multiplier = getStreakMultiplier(streak)
 
-  const components: ScoreComponents = {
-    physical: Math.round(physicalScore(totalSteps, totalSleep)),
-    digital: Math.round(digitalScore(totalScreen)),
-    productivity: Math.round(productivityScore(totalFocusSec)),
-    mood: Math.round(moodScore(avgStress)),
-    eco: Math.round(ecoScore(ecoCount)),
+  const baseGoals = {
+    goalStepsPerDay:          profile?.goalStepsPerDay          ?? DEFAULT_GOALS.goalStepsPerDay,
+    goalSleepHours:           profile?.goalSleepHours           ?? DEFAULT_GOALS.goalSleepHours,
+    goalScreenMinutes:        profile?.goalScreenMinutes        ?? DEFAULT_GOALS.goalScreenMinutes,
+    goalFocusMinutes:         profile?.goalFocusMinutes         ?? DEFAULT_GOALS.goalFocusMinutes,
+    goalEcoActionsPerDay:     profile?.goalEcoActionsPerDay     ?? DEFAULT_GOALS.goalEcoActionsPerDay,
+    goalSocialMinutes:        profile?.goalSocialMinutes        ?? DEFAULT_GOALS.goalSocialMinutes,
+    goalEntertainmentMinutes: profile?.goalEntertainmentMinutes ?? DEFAULT_GOALS.goalEntertainmentMinutes,
   }
 
+  // Apply streak progression — upward goals increase, screen limits decrease
+  const goals = {
+    goalStepsPerDay:          Math.round((baseGoals.goalStepsPerDay * multiplier) / 500) * 500,
+    goalSleepHours:           Math.min(Math.round(baseGoals.goalSleepHours * multiplier * 2) / 2, 9),
+    goalFocusMinutes:         Math.round((baseGoals.goalFocusMinutes * multiplier) / 15) * 15,
+    goalEcoActionsPerDay:     Math.min(Math.round(baseGoals.goalEcoActionsPerDay * multiplier), 8),
+    // Screen limits go DOWN as streak grows
+    goalSocialMinutes:        Math.round(baseGoals.goalSocialMinutes / multiplier),
+    goalEntertainmentMinutes: Math.round(baseGoals.goalEntertainmentMinutes / multiplier),
+    goalScreenMinutes:        Math.round(baseGoals.goalScreenMinutes / multiplier),
+  }
+
+  // ── Aggregate raw values ────────────────────────────────────────────────
+  const totalSteps = physical.reduce((s, e) => s + e.steps, 0)
+  const totalSleepMin = physical.reduce((s, e) => s + e.sleepMinutes, 0)
+  const totalFocusSec = productivity.reduce((s, e) => s + e.durationSec, 0)
+  const avgStress = mood.length > 0
+    ? mood.reduce((s, e) => s + e.stressScore, 0) / mood.length
+    : 5
+  const ecoCount = eco.length
+
+  // Extract category breakdown from digital entries
+  let socialMin = 0
+  let entertainMin = 0
+  let productiveMin = 0
+
+  digital.forEach((e) => {
+    const bd = e.categoryBreakdown as Record<string, number>
+    socialMin      += bd['Social']        ?? 0
+    entertainMin   += bd['Entertainment'] ?? 0
+    productiveMin  += bd['Productive']    ?? 0
+  })
+
+  // ── Compute component scores ────────────────────────────────────────────
+  const components: ScoreComponents = {
+    physical: Math.round(physicalScore(
+      totalSteps, totalSleepMin,
+      goals.goalStepsPerDay, goals.goalSleepHours,
+    )),
+    digital: Math.round(digitalScore(
+      socialMin, entertainMin, productiveMin,
+      goals.goalSocialMinutes, goals.goalEntertainmentMinutes, goals.goalFocusMinutes,
+    )),
+    productivity: Math.round(productivityScore(
+      totalFocusSec, productiveMin, goals.goalFocusMinutes,
+    )),
+    mood: Math.round(moodScore(avgStress)),
+    eco: Math.round(ecoScore(ecoCount, goals.goalEcoActionsPerDay)),
+  }
+
+  // ── Weighted total ──────────────────────────────────────────────────────
   const score = Math.round(
-    components.physical * 0.25 +
-      components.digital * 0.2 +
-      components.productivity * 0.25 +
-      components.mood * 0.2 +
-      components.eco * 0.1,
+    components.physical    * 0.26 +
+    components.digital     * 0.20 +
+    components.productivity * 0.22 +
+    components.mood        * 0.16 +
+    components.eco         * 0.16,
   )
 
-  const insight = buildInsight(components)
+  const insight = buildInsight(components, baseGoals, streak)
   const dateStr = start.toISOString().slice(0, 10)
 
-  // Upsert DailySummary — store component scores and insight; NOT the total score
+  // ── Persist to DailySummary ─────────────────────────────────────────────
   await prisma.dailySummary.upsert({
     where: { userId_date: { userId, date: start } },
     create: {
-      userId,
-      date: start,
+      userId, date: start,
       insightText: insight,
       physicalScore: components.physical,
       digitalScore: components.digital,

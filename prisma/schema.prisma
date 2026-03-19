@@ -18,6 +18,7 @@ model User {
   updatedAt    DateTime @updatedAt
 
   preferences          UserPreferences?
+  profile              UserProfile?
   physicalEntries      PhysicalActivityEntry[]
   digitalEntries       DigitalUsageEntry[]
   productivitySessions ProductivitySession[]
@@ -45,6 +46,31 @@ model UserPreferences {
   units                String  @default("metric")
   notificationsEnabled Boolean @default(true)
   focusMode            Boolean @default(false)
+}
+
+// Stores permanent onboarding profile data
+model UserProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth        DateTime?
+  gender             String?  // 'male' | 'female' | 'non-binary' | 'prefer-not-to-say'
+  heightCm           Float?
+  weightKg           Float?
+  hasDisability      Boolean  @default(false)
+  disabilityNote     String?
+  primaryGoal        String?  // 'lose-weight' | 'gain-muscle' | 'better-sleep' | 'reduce-stress' | 'build-habits' | 'improve-fitness' | 'eco-lifestyle'
+  onboardingComplete Boolean  @default(false)
+  // Calculated goals — stored so score system uses them
+  goalStepsPerDay        Int?
+  goalSleepHours         Float?
+  goalScreenMinutes      Int?
+  goalFocusMinutes       Int?
+  goalEcoActionsPerDay   Int?
+  goalSocialMinutes      Int?
+  goalEntertainmentMinutes Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model PhysicalActivityEntry {

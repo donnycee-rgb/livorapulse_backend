@@ -6,7 +6,6 @@ import { prisma } from '../db/prisma'
 import { AppError } from '../utils/response'
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
-  // All user routes require authentication
   app.addHook('preHandler', authenticate)
 
   // GET /api/user/profile
@@ -25,6 +24,20 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
             units: true,
             notificationsEnabled: true,
             focusMode: true,
+          },
+        },
+        profile: {
+          select: {
+            onboardingComplete: true,
+            primaryGoal: true,
+            goalStepsPerDay: true,
+            goalSleepHours: true,
+            goalScreenMinutes: true,
+            goalFocusMinutes: true,
+            goalEcoActionsPerDay: true,
+            hasDisability: true,
+            gender: true,
+            dateOfBirth: true,
           },
         },
       },
@@ -69,6 +82,17 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
               units: true,
               notificationsEnabled: true,
               focusMode: true,
+            },
+          },
+          profile: {
+            select: {
+              onboardingComplete: true,
+              primaryGoal: true,
+              goalStepsPerDay: true,
+              goalSleepHours: true,
+              goalScreenMinutes: true,
+              goalFocusMinutes: true,
+              goalEcoActionsPerDay: true,
             },
           },
         },

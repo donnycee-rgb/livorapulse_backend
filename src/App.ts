@@ -11,6 +11,7 @@ import { prisma } from './db/prisma'
 import { errorHandler } from './middleware/error'
 import { authRoutes } from './routes/auth'
 import { userRoutes } from './routes/user'
+import { onboardingRoutes } from './routes/onboarding'
 import { physicalRoutes } from './routes/physical'
 import { digitalRoutes } from './routes/digital'
 import { productivityRoutes } from './routes/productivity'
@@ -127,6 +128,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(authRoutes, { prefix: '/api/auth' })
   await app.register(userRoutes, { prefix: '/api/user' })
+  await app.register(onboardingRoutes, { prefix: '/api/user/onboarding' })
   await app.register(physicalRoutes, { prefix: '/api/activity/physical' })
   await app.register(digitalRoutes, { prefix: '/api/activity/digital' })
   await app.register(productivityRoutes, { prefix: '/api/productivity/session' })
