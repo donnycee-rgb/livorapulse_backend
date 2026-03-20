@@ -26,6 +26,9 @@ model User {
   ecoActions           EcoAction[]
   dailySummaries       DailySummary[]
   refreshTokens        RefreshToken[]
+  cycleLogs            CycleLog[]
+  nutritionLogs        NutritionLog[]
+  waterLogs            WaterLog[]
 }
 
 model RefreshToken {
@@ -69,6 +72,7 @@ model UserProfile {
   goalEcoActionsPerDay   Int?
   goalSocialMinutes      Int?
   goalEntertainmentMinutes Int?
+  goalCaloriesPerDay   Int?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -141,4 +145,41 @@ model DailySummary {
   updatedAt         DateTime @updatedAt
 
   @@unique([userId, date])
+}
+
+model CycleLog {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  periodStartDate DateTime
+  cycleLength     Int      @default(28)
+  periodDuration  Int      @default(5)
+  flowIntensity   String?  // 'spotting' | 'light' | 'medium' | 'heavy'
+  symptoms        Json?    // string[] — cramps, bloating, fatigue, etc.
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model NutritionLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mealType     String   // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  foodName     String
+  calories     Float
+  proteinG     Float    @default(0)
+  carbsG       Float    @default(0)
+  fatG         Float    @default(0)
+  quantity     Float    @default(1)
+  unit         String   @default("serving")
+  timestamp    DateTime @default(now())
+}
+
+model WaterLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  glasses   Int      @default(1)
+  timestamp DateTime @default(now())
 }

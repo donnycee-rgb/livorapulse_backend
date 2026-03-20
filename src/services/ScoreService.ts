@@ -8,6 +8,7 @@ export interface ScoreComponents {
   productivity: number
   mood: number
   eco: number
+  nutrition: number
 }
 
 export interface DailyScoreResult {
@@ -111,6 +112,11 @@ function ecoScore(actionCount: number, goalEcoActions: number): number {
   return clamp((actionCount / goalEcoActions) * 100, 0, 100)
 }
 
+function nutritionScore(totalCalories: number, goalCalories: number): number {
+  if (totalCalories === 0) return 50 // neutral — don't punish for not logging
+  return clamp((totalCalories / goalCalories) * 100, 0, 100)
+}
+
 function buildInsight(
   components: ScoreComponents,
   goals: typeof DEFAULT_GOALS,
@@ -125,6 +131,7 @@ function buildInsight(
     productivity: `Even one focused session can help you reach your ${goals.goalFocusMinutes}-minute focus goal.`,
     mood: 'Your stress levels look high — try a short breathing exercise or a walk.',
     eco: 'Log an eco action today to improve your sustainability score.',
+    nutrition: 'Log your meals on the Nutrition page to keep your nutrition score on track.',
   }
 
   if (streak >= 7) {
@@ -146,7 +153,7 @@ export async function computeDailyScore(
   const { start, end } = dayBounds(date)
 
   // Fetch all data in parallel — including user profile for personal goals
-  const [physical, digital, productivity, mood, eco, profile, streakRaw] = await Promise.all([
+  const [physical, digital, productivity, mood, eco, nutrition, profile, streakRaw] = await Promise.all([
     prisma.physicalActivityEntry.findMany({
       where: { userId, timestamp: { gte: start, lte: end } },
       select: { steps: true, sleepMinutes: true },
@@ -167,6 +174,10 @@ export async function computeDailyScore(
       where: { userId, timestamp: { gte: start, lte: end } },
       select: { id: true },
     }),
+    prisma.nutritionLog.findMany({
+      where: { userId, timestamp: { gte: start, lte: end } },
+      select: { calories: true },
+    }),
     prisma.userProfile.findUnique({
       where: { userId },
       select: {
@@ -177,6 +188,7 @@ export async function computeDailyScore(
         goalEcoActionsPerDay: true,
         goalSocialMinutes: true,
         goalEntertainmentMinutes: true,
+        goalCaloriesPerDay: true,
       },
     }),
     // Get streak from Redis if available — fall back to 0
@@ -197,6 +209,7 @@ export async function computeDailyScore(
     goalEcoActionsPerDay:     profile?.goalEcoActionsPerDay     ?? DEFAULT_GOALS.goalEcoActionsPerDay,
     goalSocialMinutes:        profile?.goalSocialMinutes        ?? DEFAULT_GOALS.goalSocialMinutes,
     goalEntertainmentMinutes: profile?.goalEntertainmentMinutes ?? DEFAULT_GOALS.goalEntertainmentMinutes,
+    goalCaloriesPerDay:       profile?.goalCaloriesPerDay        ?? 2000,
   }
 
   // Apply streak progression — upward goals increase, screen limits decrease
@@ -209,6 +222,7 @@ export async function computeDailyScore(
     goalSocialMinutes:        Math.round(baseGoals.goalSocialMinutes / multiplier),
     goalEntertainmentMinutes: Math.round(baseGoals.goalEntertainmentMinutes / multiplier),
     goalScreenMinutes:        Math.round(baseGoals.goalScreenMinutes / multiplier),
+    goalCaloriesPerDay:       profile?.goalCaloriesPerDay ?? 2000,
   }
 
   // ── Aggregate raw values ────────────────────────────────────────────────
@@ -219,6 +233,7 @@ export async function computeDailyScore(
     ? mood.reduce((s, e) => s + e.stressScore, 0) / mood.length
     : 5
   const ecoCount = eco.length
+  const totalCalories = nutrition.reduce((s, e) => s + e.calories, 0)
 
   // Extract category breakdown from digital entries
   let socialMin = 0
@@ -247,15 +262,17 @@ export async function computeDailyScore(
     )),
     mood: Math.round(moodScore(avgStress)),
     eco: Math.round(ecoScore(ecoCount, goals.goalEcoActionsPerDay)),
+    nutrition: Math.round(nutritionScore(totalCalories, goals.goalCaloriesPerDay)),
   }
 
   // ── Weighted total ──────────────────────────────────────────────────────
   const score = Math.round(
-    components.physical    * 0.26 +
-    components.digital     * 0.20 +
-    components.productivity * 0.22 +
-    components.mood        * 0.16 +
-    components.eco         * 0.16,
+    components.physical     * 0.23 +
+    components.digital      * 0.18 +
+    components.productivity * 0.20 +
+    components.mood         * 0.14 +
+    components.eco          * 0.14 +
+    components.nutrition    * 0.11,
   )
 
   const insight = buildInsight(components, baseGoals, streak)

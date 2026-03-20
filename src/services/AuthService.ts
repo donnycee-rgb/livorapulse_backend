@@ -11,8 +11,6 @@ import { hashPassword, comparePassword } from '../utils/hash'
 import { AppError } from '../utils/response'
 import type { RegisterInput, LoginInput } from '../schemas/auth.schema'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface AuthUser {
   id: string
   name: string
@@ -28,8 +26,6 @@ export interface AuthResult extends TokenPair {
   user: AuthUser
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 async function issueTokens(userId: string, email: string): Promise<TokenPair> {
   const accessToken = signAccessToken({ id: userId, email })
   const refreshToken = signRefreshToken({ id: userId, email })
@@ -40,18 +36,13 @@ async function issueTokens(userId: string, email: string): Promise<TokenPair> {
   return { accessToken, refreshToken }
 }
 
-// Exported so the Google OAuth callback route can call it directly.
 export async function issueTokensForUser(userId: string, email: string): Promise<TokenPair> {
   return issueTokens(userId, email)
 }
 
-// ─── Auth operations ──────────────────────────────────────────────────────────
-
 export async function register(input: RegisterInput): Promise<AuthResult> {
   const existing = await prisma.user.findUnique({ where: { email: input.email } })
-  if (existing) {
-    throw new AppError('CONFLICT', 'Email is already in use', 409)
-  }
+  if (existing) throw new AppError('CONFLICT', 'Email is already in use', 409)
 
   const passwordHash = await hashPassword(input.password)
 
@@ -78,26 +69,19 @@ export async function login(input: LoginInput): Promise<AuthResult> {
     select: { id: true, name: true, email: true, passwordHash: true },
   })
 
-  if (!user || !user.passwordHash) {
+  if (!user || !user.passwordHash)
     throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401)
-  }
 
   const valid = await comparePassword(input.password, user.passwordHash)
-  if (!valid) {
-    throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401)
-  }
+  if (!valid) throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401)
 
-  // Revoke all existing refresh tokens for this user
   await prisma.refreshToken.updateMany({
     where: { userId: user.id, revoked: false },
     data: { revoked: true },
   })
 
   const tokens = await issueTokens(user.id, user.email)
-  return {
-    user: { id: user.id, name: user.name, email: user.email },
-    ...tokens,
-  }
+  return { user: { id: user.id, name: user.name, email: user.email }, ...tokens }
 }
 
 export async function logout(refreshToken: string): Promise<void> {
@@ -110,14 +94,11 @@ export async function logout(refreshToken: string): Promise<void> {
 export async function refresh(refreshToken: string): Promise<TokenPair> {
   const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } })
 
-  if (!stored || stored.revoked) {
+  if (!stored || stored.revoked)
     throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
-  }
-  if (stored.expiresAt < new Date()) {
+  if (stored.expiresAt < new Date())
     throw new AppError('UNAUTHORIZED', 'Refresh token expired', 401)
-  }
 
-  // Verify JWT signature as well
   let payload: { id: string; email: string }
   try {
     payload = verifyRefreshToken(refreshToken)
@@ -125,7 +106,6 @@ export async function refresh(refreshToken: string): Promise<TokenPair> {
     throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
   }
 
-  // Token rotation: revoke old, issue new
   await prisma.refreshToken.update({
     where: { id: stored.id },
     data: { revoked: true },
@@ -140,7 +120,6 @@ export async function forgotPassword(email: string): Promise<void> {
     select: { id: true, email: true },
   })
 
-  // Always return 200 — do not reveal whether the email exists
   if (!user) return
 
   const resetToken = crypto.randomBytes(32).toString('hex')
@@ -149,7 +128,6 @@ export async function forgotPassword(email: string): Promise<void> {
   const resetUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/reset-password?token=${resetToken}&userId=${user.id}`
 
   if (process.env.NODE_ENV === 'production') {
-    // TODO: Integrate email service (e.g. SendGrid / Resend) to send resetUrl to user.email
     console.log(`[TODO] Send password reset email to ${user.email}`)
   } else {
     console.log(`[DEV] Password reset URL for ${user.email}: ${resetUrl}`)
@@ -171,6 +149,23 @@ export async function getMe(userId: string): Promise<object> {
           units: true,
           notificationsEnabled: true,
           focusMode: true,
+        },
+      },
+      // ── Include full profile so frontend gets gender, goals etc. ──
+      profile: {
+        select: {
+          onboardingComplete: true,
+          primaryGoal: true,
+          gender: true,
+          dateOfBirth: true,
+          hasDisability: true,
+          goalStepsPerDay: true,
+          goalSleepHours: true,
+          goalScreenMinutes: true,
+          goalFocusMinutes: true,
+          goalEcoActionsPerDay: true,
+          goalSocialMinutes: true,
+          goalEntertainmentMinutes: true,
         },
       },
     },
