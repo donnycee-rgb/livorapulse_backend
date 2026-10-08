@@ -78,8 +78,9 @@ export function applyStreak(goals: Goals, multiplier: number): Goals {
 // ─── Onboarding ──────────────────────────────────────────────────────────────
 
 export interface OnboardingAnswers {
-  dateOfBirth: string
-  gender: string
+  /** Optional — without it no age-based adjustments are made */
+  dateOfBirth?: string
+  gender?: string
   heightCm?: number
   weightKg?: number
   hasDisability: boolean
@@ -98,7 +99,9 @@ const ACTIVITY_FACTOR: Record<string, number> = {
   'very-active': 1.9,
 }
 
-function ageFrom(dateOfBirth: string): number {
+/** Age in whole years, or NaN when the birth date is unknown */
+function ageFrom(dateOfBirth?: string): number {
+  if (!dateOfBirth) return NaN
   return Math.floor((Date.now() - new Date(dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
 }
 

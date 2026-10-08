@@ -1,11 +1,13 @@
 import { z } from 'zod'
 
+// Setup after sign-up. Only the main goal is required — every other answer
+// can be skipped and falls back to standard targets.
 export const onboardingSchema = z.object({
-  dateOfBirth: z.string().datetime(),
-  gender: z.enum(['male', 'female', 'non-binary', 'prefer-not-to-say']),
+  dateOfBirth: z.string().datetime().optional(),
+  gender: z.enum(['male', 'female', 'non-binary', 'prefer-not-to-say']).optional(),
   heightCm: z.number().positive().optional(),
   weightKg: z.number().positive().optional(),
-  hasDisability: z.boolean(),
+  hasDisability: z.boolean().default(false),
   disabilityNote: z.string().optional(),
   primaryGoal: z.enum([
     'lose-weight',
@@ -16,13 +18,14 @@ export const onboardingSchema = z.object({
     'improve-fitness',
     'eco-lifestyle',
   ]),
-  // These are used to calculate goals — not stored directly
-  currentSleepHours: z.number().min(0).max(24),
-  currentActivityLevel: z.enum(['sedentary', 'light', 'moderate', 'active', 'very-active']),
-  currentScreenHours: z.number().min(0).max(24),
-  currentMood: z.enum(['thriving', 'balanced', 'struggling', 'overwhelmed', 'exhausted']),
-  currentStress: z.enum(['very-calm', 'mild', 'moderate', 'high', 'burned-out']),
-  ecoConsciousness: z.enum(['rarely', 'sometimes', 'often', 'always']),
+  // Used to calculate goals — not stored directly. Defaults are typical values.
+  currentSleepHours: z.number().min(0).max(24).default(7.5),
+  currentActivityLevel: z.enum(['sedentary', 'light', 'moderate', 'active', 'very-active']).default('light'),
+  currentScreenHours: z.number().min(0).max(24).default(4),
+  // No longer asked during setup (mood is logged daily on the Mood page); accepted for older clients
+  currentMood: z.enum(['thriving', 'balanced', 'struggling', 'overwhelmed', 'exhausted']).optional(),
+  currentStress: z.enum(['very-calm', 'mild', 'moderate', 'high', 'burned-out']).optional(),
+  ecoConsciousness: z.enum(['rarely', 'sometimes', 'often', 'always']).default('sometimes'),
 })
 
 export type OnboardingInput = z.infer<typeof onboardingSchema>
