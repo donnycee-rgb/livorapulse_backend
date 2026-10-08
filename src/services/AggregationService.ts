@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma'
+import { dayKey, daysAgoStart } from '../utils/day'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,16 +36,12 @@ export interface EcoAggregate {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Today plus the six days before it, split at local (Nairobi) midnight
 function sevenDaysAgo(): Date {
-  const d = new Date()
-  d.setDate(d.getDate() - 6)
-  d.setUTCHours(0, 0, 0, 0)
-  return d
+  return daysAgoStart(6)
 }
 
-function toDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
+const toDateKey = dayKey
 
 // ─── Weekly aggregate functions ───────────────────────────────────────────────
 

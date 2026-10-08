@@ -1,4 +1,5 @@
 import { Queue } from 'bullmq'
+import { APP_TIMEZONE } from '../utils/day'
 
 if (!process.env.REDIS_URL) {
   throw new Error('REDIS_URL environment variable is not set')
@@ -31,19 +32,28 @@ export const streaksQueue = new Queue('streaks', {
 })
 
 /**
- * Register the repeatable cron jobs.
- * BullMQ v5 uses `pattern` instead of `cron` in RepeatOptions.
+ * Register the scheduled jobs. Schedulers are upserted by id, so changing a
+ * schedule here replaces the old one instead of adding a second copy.
  */
 export async function registerRepeatableJobs(): Promise<void> {
-  await dailySummaryQueue.add(
-    'dispatch-daily-summaries',
-    {},
-    { repeat: { pattern: '0 0 * * *' }, jobId: 'nightly-daily-summary' },
-  )
+  // Remove the schedules registered by earlier versions (UTC midnight / old ids)
+  await dailySummaryQueue
+    .removeRepeatable('dispatch-daily-summaries', { pattern: '0 0 * * *' }, 'nightly-daily-summary')
+    .catch(() => false)
+  await streaksQueue
+    .removeRepeatable('update-all-streaks', { pattern: '0 * * * *' }, 'hourly-streaks')
+    .catch(() => false)
 
-  await streaksQueue.add(
-    'update-all-streaks',
-    {},
-    { repeat: { pattern: '0 * * * *' }, jobId: 'hourly-streaks' },
+  // Five past local midnight — finalise yesterday's score for every user
+  await dailySummaryQueue.upsertJobScheduler(
+    'nightly-daily-summary',
+    { pattern: '5 0 * * *', tz: APP_TIMEZONE },
+    { name: 'dispatch-daily-summaries', data: {} },
+  )
+  // Hourly — refresh the cached streaks
+  await streaksQueue.upsertJobScheduler(
+    'hourly-streaks',
+    { pattern: '0 * * * *', tz: APP_TIMEZONE },
+    { name: 'update-all-streaks', data: {} },
   )
 }

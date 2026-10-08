@@ -1,204 +1,245 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
-import { validate } from '../middleware/validate'
-import { z } from 'zod'
 import { prisma } from '../db/prisma'
-import { redis } from '../db/redis'
+import { computeDailyScore } from '../services/ScoreService'
+import { computeCyclePhase, computeSmartAverage } from './cycle'
+import { APP_TIMEZONE, dayBounds } from '../utils/day'
 
 // ---------------------------------------------------------------------------
-// Request schema
+// Local types for reduce/map callbacks
 // ---------------------------------------------------------------------------
-const chatSchema = z.object({
-  messages: z.array(
-    z.object({
-      role: z.enum(['user', 'assistant']),
-      content: z.string().min(1).max(4000),
-    }),
-  ).min(1).max(20),
-})
+interface ProductivityItem  { durationSec: number; kind: string }
+interface NutritionItem     { foodName: string; calories: number; mealType: string }
+interface EcoItem           { category: string; type: string; impactKgCO2: number }
 
 // ---------------------------------------------------------------------------
-// Build system prompt from user's real data (server-side)
+// Build a rich context summary of the user's current state
+// This is injected into every coach conversation so it knows everything
 // ---------------------------------------------------------------------------
-async function buildSystemPrompt(userId: string): Promise<string> {
-  const now = new Date()
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
-  const todayEnd = new Date(todayStart)
-  todayEnd.setDate(todayEnd.getDate() + 1)
+async function buildUserContext(userId: string): Promise<string> {
+  const { start: today, end: tomorrow } = dayBounds()
+  const range = { gte: today, lt: tomorrow }
 
-  const weekStart = new Date(now)
-  weekStart.setDate(weekStart.getDate() - 7)
-  weekStart.setHours(0, 0, 0, 0)
-
-  const [user, physical, digital, productivity, mood, eco, streakRaw] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true, email: true },
+  // Fetch everything in parallel — today's score carries the effective goals and streak
+  const [
+    profile,
+    todayPhysical,
+    todayDigital,
+    todayProductivity,
+    todayMood,
+    todayEco,
+    todayNutrition,
+    todayWater,
+    cycleLatest,
+    recentCycles,
+    score,
+  ] = await Promise.all([
+    prisma.userProfile.findUnique({
+      where: { userId },
+      select: { gender: true, primaryGoal: true, hasDisability: true, defaultCycleLength: true },
     }),
     prisma.physicalActivityEntry.findMany({
-      where: { userId, timestamp: { gte: todayStart, lt: todayEnd } },
+      where: { userId, timestamp: range },
+      select: { steps: true, distanceKm: true, sleepMinutes: true, caloriesKcal: true },
     }),
     prisma.digitalUsageEntry.findMany({
-      where: { userId, date: { gte: todayStart, lt: todayEnd } },
+      where: { userId, date: range },
+      select: { screenTimeMinutes: true, categoryBreakdown: true },
     }),
     prisma.productivitySession.findMany({
-      where: { userId, startedAt: { gte: todayStart, lt: todayEnd } },
+      where: { userId, startedAt: range },
+      select: { durationSec: true, kind: true },
     }),
-    prisma.moodLog.findMany({
-      where: { userId, timestamp: { gte: todayStart, lt: todayEnd } },
+    prisma.moodLog.findFirst({
+      where: { userId, timestamp: range },
       orderBy: { timestamp: 'desc' },
-      take: 1,
+      select: { emoji: true, stressScore: true },
     }),
     prisma.ecoAction.findMany({
-      where: { userId, timestamp: { gte: todayStart, lt: todayEnd } },
+      where: { userId, timestamp: range },
+      select: { category: true, type: true, impactKgCO2: true },
     }),
-    redis.get(`streak:${userId}`),
+    prisma.nutritionLog.findMany({
+      where: { userId, timestamp: range },
+      select: { foodName: true, calories: true, mealType: true },
+    }),
+    prisma.waterLog.findMany({
+      where: { userId, timestamp: range },
+      select: { glasses: true },
+    }),
+    prisma.cycleLog.findFirst({
+      where: { userId },
+      orderBy: { periodStartDate: 'desc' },
+      select: { periodStartDate: true, cycleLength: true, symptoms: true },
+    }),
+    prisma.cycleLog.findMany({
+      where: { userId },
+      orderBy: { periodStartDate: 'desc' },
+      take: 6,
+      select: { periodStartDate: true, periodDuration: true, actualCycleLength: true },
+    }),
+    computeDailyScore(userId),
   ])
 
-  const firstName = user?.name.trim().split(/\s+/)[0] ?? 'there'
-  const streak = streakRaw ? parseInt(streakRaw, 10) : 0
+  const { goals, streak } = score
 
-  const steps = physical.reduce((s, e) => s + e.steps, 0)
-  const sleepHours = physical.reduce((s, e) => s + e.sleepMinutes, 0) / 60
-  const distanceKm = physical.reduce((s, e) => s + e.distanceKm, 0)
-  const calories = physical.reduce((s, e) => s + e.caloriesKcal, 0)
-  const screenMin = digital.reduce((s, e) => s + e.screenTimeMinutes, 0)
-  const focusMin = productivity.reduce((s, e) => s + Math.round(e.durationSec / 60), 0)
-  const latestMood = mood[0]
-  const ecoCount = eco.length
+  // ── Today's totals (there can be several entries per day) ───────────────
+  const steps = todayPhysical.reduce((s, e) => s + e.steps, 0)
+  const sleepMinutes = todayPhysical.reduce((s, e) => s + e.sleepMinutes, 0)
+  const distanceKm = todayPhysical.reduce((s, e) => s + e.distanceKm, 0)
+  const burned = todayPhysical.reduce((s, e) => s + e.caloriesKcal, 0)
+  const screenMinutes = todayDigital.reduce((s, e) => s + e.screenTimeMinutes, 0)
+  const waterGlasses = todayWater.reduce((s, e) => s + e.glasses, 0)
+  const notLogged = (Object.keys(score.logged) as (keyof typeof score.logged)[])
+    .filter((k) => !score.logged[k])
 
-  const physicalScore = Math.round(Math.min(
-    0.7 * (steps / 8000) * 100 + 0.3 * (sleepHours / 8) * 100, 100,
-  ))
-  const digitalScore = Math.round(Math.max(0, Math.min(110 - (screenMin / 240) * 100, 100)))
-  const productivityScore = Math.round(Math.min((focusMin / 120) * 100, 100))
-  const ecoScore = Math.round(Math.min(ecoCount * 25, 100))
-  const moodScore = latestMood
-    ? Math.round(Math.max(0, 100 - (latestMood.stressScore / 10) * 100))
-    : 60
-
-  const overallScore = Math.round(
-    0.26 * physicalScore +
-    0.20 * digitalScore +
-    0.22 * productivityScore +
-    0.16 * moodScore +
-    0.16 * ecoScore,
+  const focusMin = Math.round(
+    todayProductivity.reduce((s: number, p: ProductivityItem) => s + p.durationSec, 0) / 60
+  )
+  const totalCalories = Math.round(
+    todayNutrition.reduce((s: number, n: NutritionItem) => s + n.calories, 0)
   )
 
-  // Weekly data
-  const weeklyPhysical = await prisma.physicalActivityEntry.findMany({
-    where: { userId, timestamp: { gte: weekStart } },
-  })
-  const weeklyFocus = await prisma.productivitySession.findMany({
-    where: { userId, startedAt: { gte: weekStart } },
-  })
-  const weeklyScreen = await prisma.digitalUsageEntry.findMany({
-    where: { userId, date: { gte: weekStart } },
-  })
+  // ── Cycle phase — same calculation as the cycle tracker ─────────────────
+  let cycleContext = ''
+  if (cycleLatest && profile?.gender === 'female') {
+    const avg = computeSmartAverage(recentCycles, profile.defaultCycleLength ?? cycleLatest.cycleLength)
+    const c = computeCyclePhase(cycleLatest.periodStartDate, avg.cycleLength, avg.periodDuration)
+    const status = c.periodActive
+      ? 'Period currently active'
+      : c.isLate
+        ? `Period is ${c.daysLate} day${c.daysLate === 1 ? '' : 's'} late (expected ${c.nextPeriodDate})`
+        : c.periodDueToday
+          ? 'Period expected today'
+          : `Days until next period: ${c.daysUntilNextPeriod + 1}`
 
-  const weeklySteps = weeklyPhysical.reduce((s, e) => s + e.steps, 0)
-  const weeklyFocusMin = weeklyFocus.reduce((s, e) => s + Math.round(e.durationSec / 60), 0)
-  const weeklyScreenMin = weeklyScreen.reduce((s, e) => s + e.screenTimeMinutes, 0)
+    cycleContext = `
+CYCLE TRACKING (private — never mention this unless directly asked):
+  Current phase: ${c.phase} (Day ${c.dayOfCycle} of ${avg.cycleLength})
+  ${status}
+  Avg cycle length: ${avg.cycleLength} days (based on ${recentCycles.length} logged cycles)
+  ${Array.isArray(cycleLatest.symptoms) && (cycleLatest.symptoms as string[]).length > 0
+    ? `Recent symptoms: ${(cycleLatest.symptoms as string[]).join(', ')}`
+    : ''}`
+  }
 
-  const moodLabel = latestMood
-    ? latestMood.stressScore <= 2 ? 'Low stress'
-    : latestMood.stressScore <= 3 ? 'Moderate stress'
-    : 'High stress'
-    : 'Not logged'
+  // ── Digital breakdown (summed across today's entries) ───────────────────
+  const breakdown: Record<string, number> = {}
+  for (const e of todayDigital) {
+    for (const [k, v] of Object.entries((e.categoryBreakdown ?? {}) as Record<string, number>)) {
+      breakdown[k] = (breakdown[k] ?? 0) + v
+    }
+  }
+  const digitalBreakdown = Object.entries(breakdown).map(([k, v]) => `${k}: ${v}min`).join(', ')
 
-  return `You are the LivoraPulse AI Wellness Coach — a data-driven personal wellness advisor with access to ${firstName}'s real health data.
+  // ── Build the full context string ──────────────────────────────────────
+  return `You are the LivoraPulse Wellness Coach — a knowledgeable, warm and practical wellness advisor.
+You have full access to this user's real-time health data. Use it to give specific, personalised advice.
+Today is ${today.toLocaleDateString('en-KE', { timeZone: APP_TIMEZONE, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
 
-USER: ${user?.name ?? 'User'}
-STREAK: ${streak} days
-OVERALL LIFEPULSE SCORE: ${overallScore}/100
+USER PROFILE:
+  Primary goal: ${profile?.primaryGoal ?? 'not set'}
+  Gender: ${profile?.gender ?? 'not specified'}
+  ${profile?.hasDisability ? 'Has physical limitations/disability' : ''}
 
-TODAY:
-- Steps: ${steps.toLocaleString()} / 8,000 goal
-- Distance: ${distanceKm.toFixed(1)} km
-- Calories burned: ${calories} kcal
-- Sleep: ${sleepHours > 0 ? `${sleepHours.toFixed(1)}h` : 'not logged'}
-- Screen time: ${screenMin > 0 ? `${Math.floor(screenMin / 60)}h ${screenMin % 60}m` : 'not logged'} (4h daily limit)
-- Focus time: ${focusMin > 0 ? `${focusMin} minutes` : 'not logged'} (2h daily goal)
-- Mood / Stress: ${moodLabel}
-- Eco actions: ${ecoCount}
+TODAY'S DATA:
+  LifePulse Score today: ${score.score}/100 (physical ${score.components.physical}, digital ${score.components.digital}, productivity ${score.components.productivity}, mood ${score.components.mood}, eco ${score.components.eco}, nutrition ${score.components.nutrition})
+  Not logged yet today: ${notLogged.join(', ') || 'nothing, everything is logged'}
 
-THIS WEEK:
-- Total steps: ${weeklySteps.toLocaleString()}
-- Total focus: ${weeklyFocusMin} minutes
-- Total screen time: ${Math.floor(weeklyScreenMin / 60)}h ${weeklyScreenMin % 60}m
+  Steps: ${steps} / ${goals.goalStepsPerDay} goal
+  Sleep: ${sleepMinutes ? `${(sleepMinutes / 60).toFixed(1)}h` : 'not logged'} / ${goals.goalSleepHours}h goal
+  Distance: ${distanceKm.toFixed(1)} km
+  Calories burned: ${burned} kcal
+  
+  Screen time: ${screenMinutes}min / ${goals.goalScreenMinutes}min limit (social limit ${goals.goalSocialMinutes}min, entertainment limit ${goals.goalEntertainmentMinutes}min)
+  ${digitalBreakdown ? `  Breakdown: ${digitalBreakdown}` : ''}
+  
+  Focus time: ${focusMin}min / ${goals.goalFocusMinutes}min goal
+  
+  Mood: ${todayMood?.emoji ?? 'not logged'} | Stress: ${todayMood ? `${todayMood.stressScore}/10 (1 = very calm, 10 = very stressed)` : 'not logged'}
+  
+  Eco actions today: ${todayEco.length} (${todayEco.map((e: EcoItem) => e.type).join(', ') || 'none'})
+  
+  Nutrition logged: ${totalCalories} kcal / ${goals.goalCaloriesPerDay} kcal goal
+  Meals: ${todayNutrition.length > 0 ? todayNutrition.map((n: NutritionItem) => `${n.foodName} (${n.mealType})`).join(', ') : 'none logged'}
+  Water: ${waterGlasses} / 8 glasses
+  
+  Current streak: ${streak} day${streak !== 1 ? 's' : ''} (targets x${score.multiplier})
+${cycleContext}
 
-DIMENSION SCORES:
-- Physical: ${physicalScore}/100
-- Digital: ${digitalScore}/100
-- Productivity: ${productivityScore}/100
-- Mental/Mood: ${moodScore}/100
-- Eco: ${ecoScore}/100
+GOALS FOR TODAY (already adjusted for the streak):
+  Steps/day: ${goals.goalStepsPerDay}
+  Sleep: ${goals.goalSleepHours}h
+  Screen time limit: ${goals.goalScreenMinutes}min
+  Focus goal: ${goals.goalFocusMinutes}min
+  Calories: ${goals.goalCaloriesPerDay} kcal/day
+  Eco actions/day: ${goals.goalEcoActionsPerDay}
 
-RESPONSE FORMAT — FOLLOW STRICTLY:
-- Maximum 3 sentences per response unless the user explicitly asks for a full breakdown or summary
-- Never use bullet points or lists unless explicitly asked
-- Never repeat information already mentioned
-- One specific actionable suggestion at the end maximum
-- If the answer is simple, one sentence is enough
-- Never pad responses with filler phrases like "Great question" or "I hope this helps"
-- Never use emojis
-- Address ${firstName} by first name only occasionally, not every message`
+RESPONSE STYLE:
+  - Be specific — reference actual numbers from the user's data
+  - Be warm and encouraging, not preachy
+  - Keep responses concise (2-4 sentences for simple questions, up to a paragraph for complex ones)
+  - If data is missing for a dimension, acknowledge it gently
+  - Never reveal cycle data unless the user explicitly asks about it
+  - For Kenyan food questions, you know the local food database includes ugali, sukuma wiki, nyama choma, chai, mandazi etc.`
 }
 
 // ---------------------------------------------------------------------------
-// Route
+// Routes
 // ---------------------------------------------------------------------------
 export async function aiRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate)
 
-  app.post('/chat', async (request: FastifyRequest, reply: FastifyReply) => {
-    const apiKey = process.env.GROQ_API_KEY
-    if (!apiKey) {
-      return reply.code(503).send({
-        success: false,
-        error: 'AI coach is not configured on this server.',
-      })
+  // POST /api/ai/chat
+  app.post('/chat', async (request, reply) => {
+    const userId = request.user!.id
+    const { messages } = request.body as {
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>
     }
 
-    const body = validate(chatSchema, request.body)
-    const userId = request.user!.id
+    if (!messages?.length) {
+      return reply.status(400).send({ success: false, error: 'No messages provided' })
+    }
 
-    // Build system prompt from real database data server-side
-    const systemPrompt = await buildSystemPrompt(userId)
+    // Build context — inject as system message
+    const systemContext = await buildUserContext(userId)
 
-    // Call Groq API server-side — API key never leaves the server
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // Call Anthropic API
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
+    if (!anthropicKey) {
+      return reply.status(500).send({ success: false, error: 'AI service not configured' })
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        max_tokens: 300,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...body.messages,
-        ],
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        system: systemContext,
+        messages: messages.slice(-10), // Keep last 10 messages for context window
       }),
     })
 
     if (!response.ok) {
       const err = await response.text()
-      app.log.error(`Groq API error: ${response.status} ${err}`)
-      return reply.code(502).send({
-        success: false,
-        error: 'Could not reach the AI service. Please try again.',
-      })
+      console.error('[AI Coach] Anthropic error:', err)
+      return reply.status(502).send({ success: false, error: 'AI service temporarily unavailable' })
     }
 
     const data = await response.json() as {
-      choices: Array<{ message: { content: string } }>
+      content: Array<{ type: string; text: string }>
     }
 
-    const replyText = data.choices[0]?.message?.content ?? 'I could not generate a response. Please try again.'
+    const reply_text = data.content
+      .filter(c => c.type === 'text')
+      .map(c => c.text)
+      .join('')
 
-    return reply.send({ success: true, data: { reply: replyText } })
+    return reply.send({ success: true, data: { reply: reply_text } })
   })
 }
