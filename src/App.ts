@@ -24,6 +24,10 @@ import { aiRoutes } from './routes/ai'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    // Render (and most hosts) put a proxy in front of the app. Trusting it gives
+    // the real client IP (so rate limits are per user, not shared by everyone)
+    // and the real protocol (so secure cookies work in production).
+    trustProxy: true,
     logger: {
       level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
       transport:
