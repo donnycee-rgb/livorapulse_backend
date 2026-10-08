@@ -2,6 +2,7 @@ import { Worker, Job } from 'bullmq'
 import { prisma } from '../../db/prisma'
 import { dailySummaryQueue } from '../queue'
 import { computeDailyScore } from '../../services/ScoreService'
+import { addDays, dayKey } from '../../utils/day'
 
 // ─── Job payload types ────────────────────────────────────────────────────────
 
@@ -11,7 +12,7 @@ interface DispatchJob {
 
 interface UserSummaryJob {
   userId: string
-  date: string // ISO date string YYYY-MM-DD
+  date: string // local calendar day, YYYY-MM-DD
 }
 
 type DailySummaryJobData = DispatchJob | UserSummaryJob
@@ -28,9 +29,8 @@ export const dailySummaryWorker = new Worker<DailySummaryJobData>(
 
     if (!data.userId) {
       // ── Dispatcher job: enqueue one job per user for yesterday ──────────────
-      const yesterday = new Date()
-      yesterday.setDate(yesterday.getDate() - 1)
-      const dateStr = yesterday.toISOString().slice(0, 10)
+      // Runs just after local midnight, so "yesterday" is the day that just ended
+      const dateStr = addDays(dayKey(), -1)
 
       const users = await prisma.user.findMany({ select: { id: true } })
 
@@ -46,8 +46,7 @@ export const dailySummaryWorker = new Worker<DailySummaryJobData>(
     }
 
     // ── Per-user job: compute and upsert score ───────────────────────────────
-    const date = new Date(data.date)
-    await computeDailyScore(data.userId, date)
+    await computeDailyScore(data.userId, data.date)
     console.log(`[DailySummary] Processed user ${data.userId} for ${data.date}`)
   },
   { connection: workerConnection },

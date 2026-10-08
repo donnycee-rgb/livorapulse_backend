@@ -4,12 +4,8 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { logNutritionSchema, logWaterSchema } from '../schemas/nutrition.schema'
 import { prisma } from '../db/prisma'
+import { dayBounds, dayKey, daysAgoStart } from '../utils/day'
 
-function dayBounds(date: Date) {
-  const start = new Date(date); start.setUTCHours(0, 0, 0, 0)
-  const end = new Date(date); end.setUTCHours(23, 59, 59, 999)
-  return { start, end }
-}
 
 // ---------------------------------------------------------------------------
 // Food search proxy — avoids CORS issues in the browser
@@ -118,7 +114,7 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/today', async (request, reply) => {
     const { start, end } = dayBounds(new Date())
     const entries = await prisma.nutritionLog.findMany({
-      where: { userId: request.user!.id, timestamp: { gte: start, lte: end } },
+      where: { userId: request.user!.id, timestamp: { gte: start, lt: end } },
       orderBy: { timestamp: 'asc' },
     })
 
@@ -134,7 +130,7 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
 
   // GET /api/nutrition/weekly — last 7 days calorie totals
   app.get('/weekly', async (request, reply) => {
-    const from = new Date(); from.setDate(from.getDate() - 6); from.setUTCHours(0, 0, 0, 0)
+    const from = daysAgoStart(6)
     const entries = await prisma.nutritionLog.findMany({
       where: { userId: request.user!.id, timestamp: { gte: from } },
       select: { calories: true, timestamp: true },
@@ -143,7 +139,8 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const map: Record<string, number> = {}
     entries.forEach(e => {
-      const d = days[new Date(e.timestamp).getDay()]
+      // Weekday of the local calendar day the meal was logged on
+      const d = days[new Date(`${dayKey(e.timestamp)}T12:00:00Z`).getUTCDay()]
       map[d] = (map[d] ?? 0) + e.calories
     })
 
@@ -163,7 +160,7 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
     const { start, end } = dayBounds(new Date())
 
     const existing = await prisma.waterLog.findFirst({
-      where: { userId: request.user!.id, timestamp: { gte: start, lte: end } },
+      where: { userId: request.user!.id, timestamp: { gte: start, lt: end } },
     })
 
     if (existing) {
@@ -184,7 +181,7 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
   app.get('/water/today', async (request, reply) => {
     const { start, end } = dayBounds(new Date())
     const log = await prisma.waterLog.findFirst({
-      where: { userId: request.user!.id, timestamp: { gte: start, lte: end } },
+      where: { userId: request.user!.id, timestamp: { gte: start, lt: end } },
     })
     return reply.send({ success: true, data: { glasses: log?.glasses ?? 0 } })
   })

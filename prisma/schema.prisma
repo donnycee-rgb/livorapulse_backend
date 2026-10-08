@@ -73,6 +73,9 @@ model UserProfile {
   goalSocialMinutes      Int?
   goalEntertainmentMinutes Int?
   goalCaloriesPerDay   Int?
+  // Cycle defaults — saved from settings, used as fallback when < 2 cycles logged
+  defaultCycleLength    Int?
+  defaultPeriodDuration Int?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -141,6 +144,8 @@ model DailySummary {
   productivityScore Float?
   moodScore         Float?
   ecoScore          Float?
+  nutritionScore    Float?
+  score             Int?     // final weighted LifePulse score shown to the user that day
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -155,10 +160,11 @@ model CycleLog {
   cycleLength     Int      @default(28)
   periodDuration  Int      @default(5)
   flowIntensity   String?  // 'spotting' | 'light' | 'medium' | 'heavy'
-  symptoms        Json?    // string[] — cramps, bloating, fatigue, etc.
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  symptoms          Json?    // string[] — cramps, bloating, fatigue, etc.
+  notes             String?
+  actualCycleLength Int?     // calculated from gap between this and previous period
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model NutritionLog {
