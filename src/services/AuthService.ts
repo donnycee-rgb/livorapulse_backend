@@ -45,6 +45,16 @@ async function issueTokens(userId: string, email: string): Promise<TokenPair> {
 // that URL would leave them in browser history and server logs, so the URL
 // carries a one-time code instead, which the app swaps for tokens straight away.
 
+/**
+ * Reads a key and deletes it in one step, so a code or link works once even
+ * if two requests race. MULTI rather than GETDEL, which needs Redis 6.2+.
+ */
+async function takeKey(key: string): Promise<string | null> {
+  const results = await redis.multi().get(key).del(key).exec()
+  const value = results?.[0]?.[1]
+  return typeof value === 'string' ? value : null
+}
+
 const LOGIN_CODE_TTL_SEC = 60
 const loginCodeKey = (code: string) => `login_code:${code}`
 
@@ -56,8 +66,7 @@ export async function createLoginCode(userId: string, email: string): Promise<st
 }
 
 export async function exchangeLoginCode(code: string): Promise<TokenPair> {
-  // GETDEL: the code works once, even if two requests race
-  const raw = await redis.getdel(loginCodeKey(code))
+  const raw = await takeKey(loginCodeKey(code)) // works once
   if (!raw) throw new AppError('UNAUTHORIZED', 'This sign-in link has expired. Please sign in again.', 401)
   const { userId, email } = JSON.parse(raw) as { userId: string; email: string }
   return issueTokens(userId, email)
@@ -234,8 +243,7 @@ export async function forgotPassword(email: string): Promise<void> {
  */
 export async function resetPassword(token: string, password: string): Promise<void> {
   const tokenHash = sha256(token)
-  // GETDEL: the link works once, even if submitted twice at the same moment
-  const userId = await redis.getdel(resetKey(tokenHash))
+  const userId = await takeKey(resetKey(tokenHash)) // works once, even if submitted twice at the same moment
   if (!userId) throw new AppError('LINK_EXPIRED', 'This reset link has expired or has already been used. Ask for a new one', 400)
   await redis.del(resetUserKey(userId))
 

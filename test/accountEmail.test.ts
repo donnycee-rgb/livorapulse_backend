@@ -26,7 +26,15 @@ vi.mock('../src/db/redis', () => {
         return 'OK'
       },
       get: async (k: string) => live(k)?.v ?? null,
-      getdel: async (k: string) => { const v = live(k)?.v ?? null; s.redis.delete(k); return v },
+      multi: () => {
+        const ops: (() => unknown)[] = []
+        const chain = {
+          get: (k: string) => { ops.push(() => live(k)?.v ?? null); return chain },
+          del: (k: string) => { ops.push(() => { s.redis.delete(k); return 1 }); return chain },
+          exec: async () => ops.map((op) => [null, op()]),
+        }
+        return chain
+      },
       del: async (k: string) => { s.redis.delete(k); return 1 },
       incr: async (k: string) => { const n = Number(live(k)?.v ?? 0) + 1; s.redis.set(k, { v: String(n), exp: live(k)?.exp ?? Date.now() + 3600_000 }); return n },
       expire: async () => 1,

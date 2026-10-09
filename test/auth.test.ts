@@ -12,7 +12,15 @@ const store = vi.hoisted(() => ({
 vi.mock('../src/db/redis', () => ({
   redis: {
     set: async (k: string, v: string) => { store.redis.set(k, v); return 'OK' },
-    getdel: async (k: string) => { const v = store.redis.get(k) ?? null; store.redis.delete(k); return v },
+    multi: () => {
+      const ops: (() => unknown)[] = []
+      const chain = {
+        get: (k: string) => { ops.push(() => store.redis.get(k) ?? null); return chain },
+        del: (k: string) => { ops.push(() => { store.redis.delete(k); return 1 }); return chain },
+        exec: async () => ops.map((op) => [null, op()]),
+      }
+      return chain
+    },
   },
 }))
 
