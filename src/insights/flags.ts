@@ -6,7 +6,7 @@
 import { addDays } from '../utils/day'
 import type { FeatureDay } from './analyze'
 
-export type FlagKey = 'low-mood' | 'short-sleep' | 'cycle-length' | 'missed-period' | 'heavy-flow'
+export type FlagKey = 'low-mood' | 'short-sleep' | 'cycle-length' | 'missed-period' | 'heavy-flow' | 'severe-pain'
 
 export const FLAG_SETTINGS = {
   lowMood: {
@@ -44,6 +44,13 @@ export const FLAG_SETTINGS = {
     minHeavy: 3,
     withinDays: 365,
   },
+  severePain: {
+    /** The cycle logger's symptom for pain worse than ordinary cramps */
+    symptom: 'Severe cramps',
+    recentPeriods: 4,
+    minSevere: 3,
+    withinDays: 365,
+  },
   /** A dismissed flag stays hidden this long, then shows again if the pattern is still there */
   quietAfterDismissDays: 30,
 }
@@ -51,6 +58,8 @@ export const FLAG_SETTINGS = {
 export interface FlagPeriod {
   startKey: string
   flowIntensity: string | null
+  /** Symptoms logged with the period (any shape; non-strings are ignored) */
+  symptoms?: unknown
 }
 
 export interface RaisedFlag {
@@ -144,6 +153,22 @@ export function heavyFlowFlag(periods: FlagPeriod[], today: string): RaisedFlag 
   return { key: 'heavy-flow', evidence: { heavyPeriods: heavy, periods: recent.length } }
 }
 
+/**
+ * Severe cramps logged with most recent periods. Only periods logged with
+ * at least one symptom count, so not filling in symptoms isn't read as
+ * "no pain".
+ */
+export function severePainFlag(periods: FlagPeriod[], today: string): RaisedFlag | null {
+  const s = FLAG_SETTINGS.severePain
+  const symptomsOf = (p: FlagPeriod) => (Array.isArray(p.symptoms) ? p.symptoms.filter((x): x is string => typeof x === 'string') : [])
+  const recent = periods
+    .filter((p) => daysBetween(p.startKey, today) <= s.withinDays && symptomsOf(p).length > 0)
+    .slice(-s.recentPeriods)
+  const severe = recent.filter((p) => symptomsOf(p).includes(s.symptom)).length
+  if (severe < s.minSevere) return null
+  return { key: 'severe-pain', evidence: { severePeriods: severe, periods: recent.length } }
+}
+
 /** Every rule, in the order flags are shown (wellbeing first) */
 export function evaluateFlags(input: { today: string; days: FeatureDay[]; periods: FlagPeriod[] }): RaisedFlag[] {
   const byDate = new Map(input.days.map((d) => [d.date, d]))
@@ -153,5 +178,6 @@ export function evaluateFlags(input: { today: string; days: FeatureDay[]; period
     cycleLengthFlag(input.periods, input.today),
     missedPeriodFlag(input.periods, input.today),
     heavyFlowFlag(input.periods, input.today),
+    severePainFlag(input.periods, input.today),
   ].filter((f): f is RaisedFlag => f !== null)
 }

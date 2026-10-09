@@ -530,6 +530,15 @@ export function describeFlag(key: string, e: Evidence): FlagCopy {
         why: 'This shows when at least 3 of your last 4 logged periods had heavy flow.',
         actions: ['summary'],
       }
+    case 'severe-pain':
+      return {
+        title: 'Severe cramps with several periods',
+        message:
+          `You logged severe cramps with ${e.severePeriods} of your last ${e.periods} periods. ` +
+          "Period pain that gets in the way of your day isn't something you just have to live with. A doctor or nurse can help.",
+        why: 'This shows when you logged "Severe cramps" with at least 3 of your last 4 periods that had symptoms logged.',
+        actions: ['summary'],
+      }
     default:
       return { title: 'Worth checking', message: '', why: '', actions: [] }
   }

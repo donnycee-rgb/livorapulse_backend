@@ -6,6 +6,7 @@ import {
   heavyFlowFlag,
   lowMoodFlag,
   missedPeriodFlag,
+  severePainFlag,
   shortSleepFlag,
   type FlagPeriod,
 } from '../../src/insights/flags'
@@ -127,6 +128,26 @@ describe('heavy flow', () => {
   })
 })
 
+describe('severe pain', () => {
+  const starts = ['2026-06-01', '2026-06-29', '2026-07-27', '2026-08-24']
+  const withSymptoms = (s: string[][]): FlagPeriod[] => starts.map((startKey, i) => ({ startKey, flowIntensity: null, symptoms: s[i] }))
+
+  it('flags severe cramps with 3 of the last 4 periods', () => {
+    const p = withSymptoms([['Severe cramps'], ['Bloating'], ['Severe cramps', 'Fatigue'], ['Severe cramps']])
+    expect(severePainFlag(p, TODAY)?.evidence).toMatchObject({ severePeriods: 3, periods: 4 })
+  })
+
+  it('never flags ordinary cramps', () => {
+    expect(severePainFlag(withSymptoms([['Cramps'], ['Cramps'], ['Cramps'], ['Cramps']]), TODAY)).toBeNull()
+  })
+
+  it('does not read "no symptoms logged" as "no pain"', () => {
+    // Two periods logged without symptoms are left out, so this is 2 of 2, not 2 of 4
+    const p = withSymptoms([['Severe cramps'], [], ['Severe cramps'], []])
+    expect(severePainFlag(p, TODAY)).toBeNull()
+  })
+})
+
 describe('evaluateFlags', () => {
   it('raises nothing for an ordinary month', () => {
     const d = [...days((i) => ({ moodValue: 3 + (i % 2), sleepMinutes: 420 + (i % 3) * 20 })).values()]
@@ -142,6 +163,7 @@ describe('flag wording', () => {
     'cycle-length': { lengths: [39, 27, 44], outside: 2, typicalMin: 21, typicalMax: 35 },
     'missed-period': { daysSince: 94, lastStart: '2026-07-08' },
     'heavy-flow': { heavyPeriods: 3, periods: 4 },
+    'severe-pain': { severePeriods: 3, periods: 4 },
   }
 
   it('gives every flag a title, a message, a reason and a next step', () => {

@@ -30,13 +30,13 @@ export async function refreshFlags(userId: string, today: string = dayKey()): Pr
   const longestWindow = Math.max(FLAG_SETTINGS.lowMood.weeks, FLAG_SETTINGS.shortSleep.weeks) * 7
   const [days, periods, existing] = await Promise.all([
     loadFeatureDays(userId, addDays(today, -longestWindow), addDays(today, -1)),
-    prisma.cycleLog.findMany({ where: { userId }, orderBy: { periodStartDate: 'asc' }, select: { periodStartDate: true, flowIntensity: true } }),
+    prisma.cycleLog.findMany({ where: { userId }, orderBy: { periodStartDate: 'asc' }, select: { periodStartDate: true, flowIntensity: true, symptoms: true } }),
     prisma.healthFlag.findMany({ where: { userId } }),
   ])
   const raised = evaluateFlags({
     today,
     days,
-    periods: periods.map((p) => ({ startKey: dayKey(p.periodStartDate), flowIntensity: p.flowIntensity })),
+    periods: periods.map((p) => ({ startKey: dayKey(p.periodStartDate), flowIntensity: p.flowIntensity, symptoms: p.symptoms })),
   })
 
   const now = new Date()
