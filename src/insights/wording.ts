@@ -3,8 +3,10 @@
 // "causes"; always show the numbers and how many days they're based on.
 // All English strings live in this file so a Swahili version can sit beside it.
 
-import type { CyclePhase, FeatureKey, Lag } from './config'
+import { betterSide, EXPERIMENT_DRIVERS, EXPERIMENT_SETTINGS, type CyclePhase, type FeatureKey, type Lag } from './config'
 import type { Split, TestResult } from './analyze'
+import type { ExperimentResult } from './experiment'
+import type { CycleSummary, MetricKey, MetricSummary } from './summary'
 
 // ─── Number formatting ──────────────────────────────────────────────────────
 
@@ -240,4 +242,199 @@ export function progressMessage(driver: FeatureKey | 'cyclePhase', outcome: Feat
   const days = plural(daysNeeded, 'more day', 'more days')
   if (driver === 'cyclePhase') return `Keep logging your ${AREA_LABEL[outcome]} on ${days} to see how it changes across your cycle.`
   return `Log ${AREA_LABEL[driver]} and ${AREA_LABEL[outcome]} on ${days} to unlock your first insights.`
+}
+
+// ─── Experiments ────────────────────────────────────────────────────────────
+
+/**
+ * The change to try for 14 days, aiming for the side of the insight's split
+ * where the outcome was better. Null when there's nothing sensible to try
+ * (food, cycle phase, or an outcome with no better direction).
+ */
+export function experimentSuggestion(i: {
+  driver: string
+  outcome: string
+  meanLow: number
+  meanHigh: number
+  splitValue: number | null
+}): string | null {
+  const driver = i.driver as FeatureKey
+  if (i.splitValue === null || !EXPERIMENT_DRIVERS.includes(driver)) return null
+  const side = betterSide(i.outcome as FeatureKey, i.meanLow, i.meanHigh)
+  if (!side) return null
+  const v = formatDriver(driver, i.splitValue)
+  const n = Math.max(1, Math.round(i.splitValue))
+
+  if (side === 'high') {
+    switch (driver) {
+      case 'sleepMinutes': return `Sleep ${v} or more each night`
+      case 'steps': return `Walk ${v.replace(' steps', '+ steps')} a day, and log your walks`
+      case 'workMinutes': return `Do at least ${v} of focus or study time a day`
+      case 'waterGlasses': return `Drink at least ${plural(n, 'glass', 'glasses')} of water a day`
+      case 'ecoActions': return `Do at least ${plural(n, 'eco action', 'eco actions')} a day`
+      default: return null // more screen time is never the suggestion
+    }
+  }
+  switch (driver) {
+    case 'screenMinutes': return `Keep your screen time under ${v} a day`
+    case 'socialMinutes': return `Keep social media under ${v} a day`
+    case 'entertainmentMinutes': return `Keep entertainment screen time under ${v} a day`
+    case 'workMinutes': return `Keep focus and study under ${v} a day, with real breaks`
+    default: return null // less sleep, walking, water or eco actions is never the suggestion
+  }
+}
+
+const OUTCOME_PHRASE: Partial<Record<FeatureKey, string>> = {
+  stressScore: 'your stress',
+  moodValue: 'your mood',
+  sleepMinutes: 'your sleep',
+  focusMinutes: 'your focus time',
+  steps: 'your logged walks',
+}
+
+const DRIVER_PHRASE: Partial<Record<FeatureKey, string>> = {
+  sleepMinutes: 'your sleep',
+  steps: 'your logged walks',
+  screenMinutes: 'your screen time',
+  socialMinutes: 'your social media time',
+  entertainmentMinutes: 'your entertainment time',
+  workMinutes: 'your focus and study time',
+  waterGlasses: 'your water',
+  ecoActions: 'your eco actions',
+}
+
+/** A driver average: minutes as time, counts to one decimal */
+function formatDriverAverage(driver: FeatureKey, v: number): string {
+  if (driver === 'waterGlasses') return `${v.toFixed(1)} glasses a day`
+  if (driver === 'ecoActions') return `${v.toFixed(1)} a day`
+  return formatDriver(driver, v)
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/** The plain-language result shown when an experiment ends — given whatever happened */
+export function experimentResultText(r: Omit<ExperimentResult, 'text'>): string {
+  const outcomePhrase = OUTCOME_PHRASE[r.outcome] ?? 'the result'
+  const scale = r.outcome === 'stressScore' || r.outcome === 'moodValue' ? ' out of 5' : ''
+  const parts: string[] = []
+
+  if (r.verdict === 'not-enough-data') {
+    parts.push(
+      `There wasn't enough ${AREA_LABEL[r.outcome]} logged to compare: it needs at least ${EXPERIMENT_SETTINGS.minDaysPerPeriod} days in each two-week period, ` +
+        `and you logged ${plural(r.before.days, 'day', 'days')} before and ${plural(r.during.days, 'day', 'days')} during.`,
+    )
+  } else {
+    const before = formatOutcome(r.outcome, r.before.mean!)
+    const during = formatOutcome(r.outcome, r.during.mean!)
+    if (r.verdict === 'no-clear-change') {
+      parts.push(
+        `${cap(outcomePhrase)} averaged ${during}${scale} during the experiment and ${before} in the 14 days before. ` +
+          "That's within your normal ups and downs, so there was no clear change this time. That's a useful result too.",
+      )
+    } else {
+      const direction = r.difference! > 0 ? 'up' : 'down'
+      const ending = r.verdict === 'improved'
+        ? "That's a clear change, though other things in your life may have changed over those weeks too."
+        : 'It went the other way this time, which is worth knowing too.'
+      parts.push(`During the experiment, ${outcomePhrase} averaged ${during}${scale}, ${direction} from ${before} in the 14 days before. ${ending}`)
+    }
+  }
+
+  const dp = DRIVER_PHRASE[r.driver]
+  if (dp && r.driverBefore.mean !== null && r.driverDuring.mean !== null) {
+    parts.push(`${cap(dp)} averaged ${formatDriverAverage(r.driver, r.driverDuring.mean)} during, compared with ${formatDriverAverage(r.driver, r.driverBefore.mean)} before.`)
+  }
+  if (r.daysAnswered > 0) {
+    parts.push(`You said you stuck to it on ${r.daysDone} of the ${plural(r.daysAnswered, 'day', 'days')} you checked in.`)
+  }
+  return parts.join(' ')
+}
+
+// ─── Health summary ─────────────────────────────────────────────────────────
+
+export const SUMMARY_DISCLAIMER = 'Self-tracked data from LivoraPulse. Not a diagnosis.'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "2026-09-28" → "28 Sep 2026" — unambiguous for any reader */
+export function formatDateLong(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]} ${y}`
+}
+
+/** Joins "a", "a and b", "a, b and c" */
+function listOf(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+const TREND_TEXT = {
+  higher: 'Higher in the second half of the period than the first.',
+  lower: 'Lower in the second half of the period than the first.',
+  steady: 'About the same through the period.',
+}
+
+/** A metric's display value as text: sleep as time, mood/stress to one decimal, walks in steps */
+export function formatSummaryValue(key: MetricKey, v: number): string {
+  if (key === 'sleep') return formatMinutes(v)
+  if (key === 'walks') return `${thousands(Math.round(v / 100) * 100)} steps`
+  return v.toFixed(1)
+}
+
+export const summaryText = {
+  metric(key: MetricKey, m: Omit<MetricSummary, 'text'>, periodDays: number): string {
+    if (m.daysLogged === 0) {
+      return key === 'walks' ? 'No walks recorded in this period.' : 'Not logged in this period.'
+    }
+    const f = (v: number) => formatSummaryValue(key, v)
+    const parts: string[] = []
+    switch (key) {
+      case 'sleep':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} nights. Average ${f(m.average!)} a night (range ${f(m.min!)} to ${f(m.max!)}).`,
+          `${plural(m.notableDays!, 'night', 'nights')} under 6h.`,
+        )
+        break
+      case 'mood':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} days. Average ${f(m.average!)} out of 5.`,
+          `Low (2 or below) on ${plural(m.notableDays!, 'day', 'days')}.`,
+        )
+        break
+      case 'stress':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} days. Average ${f(m.average!)} out of 5.`,
+          `High (4 or above) on ${plural(m.notableDays!, 'day', 'days')}.`,
+        )
+        break
+      case 'walks':
+        parts.push(
+          `Walks recorded on ${plural(m.daysLogged, 'day', 'days')}, averaging ${f(m.average!)} on those days.`,
+          'Counts recorded walks only, not all-day steps.',
+        )
+        break
+    }
+    if (m.trend) parts.push(TREND_TEXT[m.trend])
+    return parts.join(' ')
+  },
+
+  cycle(c: Omit<CycleSummary, 'text'>): string {
+    if (c.periodsLogged === 0) return 'Cycle tracking is on, but no periods were logged in this period.'
+    const parts = [`${plural(c.periodsLogged, 'period', 'periods')} logged; the last started on ${formatDateLong(c.lastPeriodStart!)}.`]
+    if (c.lengths.length > 0) {
+      parts.push(
+        `Cycle ${c.lengths.length === 1 ? 'length' : 'lengths'}: ${listOf(c.lengths.map(String))} days` +
+          (c.lengths.length > 1 ? ` (average ${c.averageLength}).` : '.'),
+      )
+      if (c.outsideTypicalRange > 0) {
+        parts.push(`${c.outsideTypicalRange} ${c.outsideTypicalRange === 1 ? 'cycle was' : 'cycles were'} outside the typical 21–35 day range.`)
+      }
+    }
+    const flows = Object.entries(c.flow).map(([k, n]) => `${k} ${n}`)
+    if (flows.length > 0) parts.push(`Flow: ${listOf(flows)}.`)
+    if (c.symptoms.length > 0) {
+      parts.push(`Symptoms logged: ${listOf(c.symptoms.slice(0, 6).map((s) => `${s.name} (${s.count})`))}.`)
+    }
+    return parts.join(' ')
+  },
 }

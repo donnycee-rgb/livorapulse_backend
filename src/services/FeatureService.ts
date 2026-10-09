@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../db/prisma'
 import { computeSmartAverage } from '../routes/cycle'
+import type { FeatureDay } from '../insights/analyze'
 import { buildDayFeatures, cycleForDay, emptyRawDay, isEmpty, type PeriodLog, type RawDay } from '../insights/features'
 import { addDays, dayKey, startOfDay } from '../utils/day'
 
@@ -99,6 +100,34 @@ export async function computeFeatures(userId: string, fromKey: string, toKey: st
     prisma.dailyFeatures.deleteMany({ where: { userId, date: { in: emptyDates } } }),
   ])
   return writes.length
+}
+
+const FEATURE_SELECT = {
+  date: true,
+  sleepMinutes: true,
+  steps: true,
+  screenMinutes: true,
+  socialMinutes: true,
+  entertainmentMinutes: true,
+  focusMinutes: true,
+  studyMinutes: true,
+  moodValue: true,
+  stressScore: true,
+  caloriesIn: true,
+  waterGlasses: true,
+  ecoActions: true,
+  cyclePhase: true,
+  cycleDay: true,
+} as const
+
+/** Saved features for each local day from `fromKey` to `toKey` (inclusive), in the shape the analysis takes */
+export async function loadFeatureDays(userId: string, fromKey: string, toKey: string): Promise<FeatureDay[]> {
+  const rows = await prisma.dailyFeatures.findMany({
+    where: { userId, date: { gte: startOfDay(fromKey), lt: startOfDay(addDays(toKey, 1)) } },
+    select: FEATURE_SELECT,
+    orderBy: { date: 'asc' },
+  })
+  return rows.map(({ date, cyclePhase, cycleDay, ...values }) => ({ date: dayKey(date), cyclePhase, cycleDay, values }))
 }
 
 /** The first local day with any log, or null if the user has logged nothing */
