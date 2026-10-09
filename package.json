@@ -14,7 +14,9 @@
     "db:studio": "prisma studio",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "insights:backfill": "node dist/scripts/backfillInsights.js",
+    "insights:backfill:dev": "tsx src/scripts/backfillInsights.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.3.1",

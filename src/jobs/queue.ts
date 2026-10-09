@@ -32,6 +32,18 @@ export const streaksQueue = new Queue('streaks', {
 })
 
 /**
+ * Queue for nightly per-user insights: recompute recent daily features, then
+ * re-run the analysis.
+ */
+export const insightsQueue = new Queue('insights', {
+  connection,
+  defaultJobOptions: {
+    removeOnComplete: 100,
+    removeOnFail: 50,
+  },
+})
+
+/**
  * Register the scheduled jobs. Schedulers are upserted by id, so changing a
  * schedule here replaces the old one instead of adding a second copy.
  */
@@ -49,6 +61,12 @@ export async function registerRepeatableJobs(): Promise<void> {
     'nightly-daily-summary',
     { pattern: '5 0 * * *', tz: APP_TIMEZONE },
     { name: 'dispatch-daily-summaries', data: {} },
+  )
+  // 00:30 local — after the daily summaries; features for the last 3 days, then insights
+  await insightsQueue.upsertJobScheduler(
+    'nightly-insights',
+    { pattern: '30 0 * * *', tz: APP_TIMEZONE },
+    { name: 'dispatch-insights', data: {} },
   )
   // Hourly — refresh the cached streaks
   await streaksQueue.upsertJobScheduler(
