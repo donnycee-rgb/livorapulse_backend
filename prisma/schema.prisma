@@ -8,11 +8,11 @@ datasource db {
 }
 
 model User {
-  id           String  @id @default(cuid())
-  email        String  @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   name         String
   passwordHash String?
-  googleId     String? @unique
+  googleId     String?  @unique
   avatarUrl    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -29,6 +29,8 @@ model User {
   cycleLogs            CycleLog[]
   nutritionLogs        NutritionLog[]
   waterLogs            WaterLog[]
+  dailyFeatures        DailyFeatures[]
+  insights             Insight[]
 }
 
 model RefreshToken {
@@ -53,31 +55,31 @@ model UserPreferences {
 
 // Stores permanent onboarding profile data
 model UserProfile {
-  id                 String   @id @default(cuid())
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  dateOfBirth        DateTime?
-  gender             String?  // 'male' | 'female' | 'non-binary' | 'prefer-not-to-say'
-  heightCm           Float?
-  weightKg           Float?
-  hasDisability      Boolean  @default(false)
-  disabilityNote     String?
-  primaryGoal        String?  // 'lose-weight' | 'gain-muscle' | 'better-sleep' | 'reduce-stress' | 'build-habits' | 'improve-fitness' | 'eco-lifestyle'
-  onboardingComplete Boolean  @default(false)
+  id                       String    @id @default(cuid())
+  userId                   String    @unique
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth              DateTime?
+  gender                   String? // 'male' | 'female' | 'non-binary' | 'prefer-not-to-say'
+  heightCm                 Float?
+  weightKg                 Float?
+  hasDisability            Boolean   @default(false)
+  disabilityNote           String?
+  primaryGoal              String? // 'lose-weight' | 'gain-muscle' | 'better-sleep' | 'reduce-stress' | 'build-habits' | 'improve-fitness' | 'eco-lifestyle'
+  onboardingComplete       Boolean   @default(false)
   // Calculated goals — stored so score system uses them
-  goalStepsPerDay        Int?
-  goalSleepHours         Float?
-  goalScreenMinutes      Int?
-  goalFocusMinutes       Int?
-  goalEcoActionsPerDay   Int?
-  goalSocialMinutes      Int?
+  goalStepsPerDay          Int?
+  goalSleepHours           Float?
+  goalScreenMinutes        Int?
+  goalFocusMinutes         Int?
+  goalEcoActionsPerDay     Int?
+  goalSocialMinutes        Int?
   goalEntertainmentMinutes Int?
-  goalCaloriesPerDay   Int?
+  goalCaloriesPerDay       Int?
   // Cycle defaults — saved from settings, used as fallback when < 2 cycles logged
-  defaultCycleLength    Int?
-  defaultPeriodDuration Int?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  defaultCycleLength       Int?
+  defaultPeriodDuration    Int?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 }
 
 model PhysicalActivityEntry {
@@ -147,7 +149,7 @@ model DailySummary {
   moodScore         Float?
   ecoScore          Float?
   nutritionScore    Float?
-  score             Int?     // final weighted LifePulse score shown to the user that day
+  score             Int? // final weighted LifePulse score shown to the user that day
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -155,33 +157,33 @@ model DailySummary {
 }
 
 model CycleLog {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  periodStartDate DateTime
-  cycleLength     Int      @default(28)
-  periodDuration  Int      @default(5)
-  flowIntensity   String?  // 'spotting' | 'light' | 'medium' | 'heavy'
-  symptoms          Json?    // string[] — cramps, bloating, fatigue, etc.
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  periodStartDate   DateTime
+  cycleLength       Int      @default(28)
+  periodDuration    Int      @default(5)
+  flowIntensity     String? // 'spotting' | 'light' | 'medium' | 'heavy'
+  symptoms          Json? // string[] — cramps, bloating, fatigue, etc.
   notes             String?
-  actualCycleLength Int?     // calculated from gap between this and previous period
+  actualCycleLength Int? // calculated from gap between this and previous period
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
 
 model NutritionLog {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mealType     String   // 'breakfast' | 'lunch' | 'dinner' | 'snack'
-  foodName     String
-  calories     Float
-  proteinG     Float    @default(0)
-  carbsG       Float    @default(0)
-  fatG         Float    @default(0)
-  quantity     Float    @default(1)
-  unit         String   @default("serving")
-  timestamp    DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mealType  String // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  foodName  String
+  calories  Float
+  proteinG  Float    @default(0)
+  carbsG    Float    @default(0)
+  fatG      Float    @default(0)
+  quantity  Float    @default(1)
+  unit      String   @default("serving")
+  timestamp DateTime @default(now())
 }
 
 model WaterLog {
@@ -190,4 +192,69 @@ model WaterLog {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   glasses   Int      @default(1)
   timestamp DateTime @default(now())
+}
+
+// One row per user per local (Nairobi) day: the values the insights engine
+// analyses, derived nightly from the raw logs. Null always means "not logged",
+// never zero. The rules for each field are in services/FeatureService.ts.
+model DailyFeatures {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date   DateTime // local day start, from utils/day.ts — same convention as DailySummary
+
+  sleepMinutes         Int? // the night that ended on the morning of this day
+  steps                Int? // steps on walks recorded with the walk tracker
+  distanceKm           Float?
+  activeCaloriesKcal   Int?
+  screenMinutes        Int?
+  socialMinutes        Int?
+  entertainmentMinutes Int?
+  focusMinutes         Int?
+  studyMinutes         Int?
+  moodValue            Float? // mean of the day's emojis mapped to 1–5
+  stressScore          Float? // mean of the day's stress answers, 1–10 as stored
+  caloriesIn           Float? // only on days with 2+ different meals logged
+  proteinG             Float? // same rule as caloriesIn
+  waterGlasses         Int?
+  ecoActions           Int? // actions that saved CO₂; 0 when only 0 kg actions were logged
+  cyclePhase           String?
+  cycleDay             Int?
+  symptoms             Json? // string[] logged with the period covering this day
+
+  computedAt DateTime @default(now()) @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+// A pattern found in one user's own data. Kept when it stops holding
+// (status "stale") so it can come back without losing its history.
+model Insight {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key             String // stable id, e.g. "sleepMinutes->stressScore:same-day"
+  driver          String
+  outcome         String
+  lag             String // "same-day" | "next-day" | "same-night"
+  direction       String // "positive" | "negative": does the outcome rise with the driver?
+  effect          Float // meanHigh − meanLow, in the outcome's stored units
+  strength        Float // effect beyond the weekday/weekend mix, in outcome SDs — for ranking
+  rho             Float? // Spearman correlation; null for cycle phase
+  groupLabelLow   String // e.g. "Under 6h sleep" (for cycle phase: the phase)
+  groupLabelHigh  String // e.g. "6h+ sleep"     (for cycle phase: rest of cycle)
+  meanLow         Float
+  meanHigh        Float
+  nDays           Int
+  qValue          Float
+  text            String // plain-language sentence shown to the user
+  status          String   @default("active") // active | stale | dismissed
+  feedback        String? // "useful" | "not-true" | null
+  dismissedEffect Float? // effect when dismissed — it only returns if much stronger
+  firstFoundAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId, status])
 }
