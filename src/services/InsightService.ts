@@ -11,7 +11,7 @@ import {
   type TestResult,
 } from '../insights/analyze'
 import { INSIGHT_SETTINGS, type FeatureKey } from '../insights/config'
-import { AREA_LABEL, describeInsight, displayValue, outcomeScaleMax, progressMessage } from '../insights/wording'
+import { AREA_LABEL, describeInsight, displayValue, outcomeScaleMax, pairLabel, progressMessage } from '../insights/wording'
 import { addDays, dayKey, startOfDay } from '../utils/day'
 
 // ─── Runs the analysis for a user and keeps their Insight rows up to date ───
@@ -196,7 +196,7 @@ export interface InsightStatus {
   /** Days with each kind of log in the last `windowDays` days */
   areas: { area: FeatureKey; label: string; days: number }[]
   /** The tests closest to having enough data, nearest first */
-  nextUp: { key: string; pairedDays: number; daysNeeded: number; message: string }[]
+  nextUp: { key: string; label: string; pairedDays: number; daysNeeded: number; message: string }[]
 }
 
 export async function insightStatus(userId: string, today: string = dayKey()): Promise<InsightStatus> {
@@ -211,6 +211,7 @@ export async function insightStatus(userId: string, today: string = dayKey()): P
     .filter((p) => p.pairedDays < min)
     .map((p) => ({
       key: p.key,
+      label: pairLabel(p.driver, p.outcome),
       pairedDays: p.pairedDays,
       daysNeeded: min - p.pairedDays,
       message: progressMessage(p.driver, p.outcome, min - p.pairedDays),

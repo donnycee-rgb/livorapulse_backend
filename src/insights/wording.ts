@@ -227,6 +227,14 @@ export function describeInsight(r: TestResult): InsightCopy {
   }
 }
 
+/** Short name for a pair in progress lists: "Sleep and mood", "Mood across your cycle" */
+export function pairLabel(driver: FeatureKey | 'cyclePhase', outcome: FeatureKey): string {
+  const text = driver === 'cyclePhase'
+    ? `${AREA_LABEL[outcome]} across your cycle`
+    : `${AREA_LABEL[driver]} and ${AREA_LABEL[outcome]}`
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 /** "Log sleep and mood on 9 more days to unlock your first insights." */
 export function progressMessage(driver: FeatureKey | 'cyclePhase', outcome: FeatureKey, daysNeeded: number): string {
   const days = plural(daysNeeded, 'more day', 'more days')

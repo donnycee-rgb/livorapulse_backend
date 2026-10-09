@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TestResult } from '../../src/insights/analyze'
-import { describeInsight, displayValue, formatMinutes, progressMessage } from '../../src/insights/wording'
+import { describeInsight, displayValue, formatMinutes, pairLabel, progressMessage } from '../../src/insights/wording'
 
 const base: TestResult = {
   key: 'k', kind: 'pair', driver: 'sleepMinutes', outcome: 'stressScore', lag: 'same-day',
@@ -76,5 +76,10 @@ describe('progressMessage', () => {
   it('tells new users what to log', () => {
     expect(progressMessage('sleepMinutes', 'moodValue', 9)).toBe('Log sleep and mood on 9 more days to unlock your first insights.')
     expect(progressMessage('sleepMinutes', 'moodValue', 1)).toBe('Log sleep and mood on 1 more day to unlock your first insights.')
+  })
+
+  it('labels pairs briefly for progress lists', () => {
+    expect(pairLabel('sleepMinutes', 'stressScore')).toBe('Sleep and stress')
+    expect(pairLabel('cyclePhase', 'moodValue')).toBe('Mood across your cycle')
   })
 })
