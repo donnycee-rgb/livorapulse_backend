@@ -438,3 +438,114 @@ export const summaryText = {
     return parts.join(' ')
   },
 }
+
+// ─── "Worth getting checked" flags ──────────────────────────────────────────
+// DRAFT WORDING, awaiting sign-off before release (the flags are off until
+// HEALTH_FLAGS_ENABLED=true). Rules for this copy: never diagnose, say what
+// was seen in the user's own logs, give one clear next step, no alarm words.
+
+export interface SupportContact {
+  name: string
+  phone: string
+  description: string
+  /**
+   * Only verified contacts are ever shown. Set this to true only after
+   * calling the number and confirming who answers and when.
+   */
+  verified: boolean
+}
+
+/** Candidates for Kenya. None are shown until verified — see `verified` above. */
+export const SUPPORT_CONTACTS: SupportContact[] = [
+  { name: 'Emergency services', phone: '999', description: 'If you or someone else is in immediate danger. 112 also works.', verified: false },
+  { name: 'Kenya Red Cross', phone: '1199', description: 'Free call, any time: counselling and support.', verified: false },
+  { name: 'Befrienders Kenya', phone: '+254 722 178 177', description: 'Someone to talk to if you are struggling.', verified: false },
+]
+
+export function verifiedContacts(): SupportContact[] {
+  return SUPPORT_CONTACTS.filter((c) => c.verified)
+}
+
+export type FlagAction = 'summary' | 'support'
+
+export interface FlagCopy {
+  title: string
+  message: string
+  /** "Why am I seeing this?" */
+  why: string
+  actions: FlagAction[]
+}
+
+type Evidence = Record<string, number | string | number[]>
+
+export function describeFlag(key: string, e: Evidence): FlagCopy {
+  switch (key) {
+    case 'low-mood':
+      return {
+        title: 'Your mood has been low for a while',
+        message:
+          `You logged a low mood on ${e.lowDays} of the ${e.loggedDays} days you checked in over the last 2 weeks. ` +
+          "Talking to someone you trust, a counsellor or a doctor can help. You don't have to wait until it feels serious.",
+        why:
+          'This shows when most of your mood check-ins in each of the last 2 weeks were one of the two lowest moods. ' +
+          "It's based only on what you logged and isn't a diagnosis.",
+        actions: ['support'],
+      }
+    case 'short-sleep':
+      return {
+        title: "You've been short on sleep for 3 weeks",
+        message:
+          `You logged under 6 hours on ${e.shortNights} of ${e.loggedNights} nights in the last 3 weeks ` +
+          `(about ${formatMinutes(Number(e.averageMinutes))} a night). Ongoing short sleep affects mood, focus and health. ` +
+          "If you're finding it hard to sleep, it's worth mentioning to a doctor.",
+        why: 'This shows when most nights you logged in each of the last 3 weeks were under 6 hours.',
+        actions: ['summary'],
+      }
+    case 'cycle-length': {
+      const lengths = (e.lengths as number[]).map(String)
+      return {
+        title: 'Your cycle length has been outside the usual range',
+        message:
+          `Your last ${lengths.length} cycles were ${listOf(lengths)} days long. Cycles are usually ${e.typicalMin}–${e.typicalMax} days. ` +
+          "It's worth mentioning to a doctor or nurse. Your health summary can help them see the pattern.",
+        why: `This shows when at least 2 of your last 3 logged cycles were shorter than ${e.typicalMin} or longer than ${e.typicalMax} days.`,
+        actions: ['summary'],
+      }
+    }
+    case 'missed-period':
+      return {
+        title: `No period logged for ${e.daysSince} days`,
+        message:
+          `Your last logged period started on ${formatDateLong(String(e.lastStart))}, ${e.daysSince} days ago. ` +
+          "If you've had a period since, log it and this goes away. If not, it's worth checking with a doctor or nurse.",
+        why: "This shows when it's been 60 days or more since the last period you logged, and you've been tracking your cycle.",
+        actions: ['summary'],
+      }
+    case 'heavy-flow':
+      return {
+        title: 'Heavy flow on several periods',
+        message:
+          `You logged heavy flow on ${e.heavyPeriods} of your last ${e.periods} periods. ` +
+          'Regular heavy periods are common and can be treated. A doctor or nurse can check whether anything is causing them.',
+        why: 'This shows when at least 3 of your last 4 logged periods had heavy flow.',
+        actions: ['summary'],
+      }
+    case 'severe-pain':
+      return {
+        title: 'Severe cramps with several periods',
+        message:
+          `You logged severe cramps with ${e.severePeriods} of your last ${e.periods} periods. ` +
+          "Period pain that gets in the way of your day isn't something you just have to live with. A doctor or nurse can help.",
+        why: 'This shows when you logged "Severe cramps" with at least 3 of your last 4 periods that had symptoms logged.',
+        actions: ['summary'],
+      }
+    default:
+      return { title: 'Worth checking', message: '', why: '', actions: [] }
+  }
+}
+
+/** For the health summary: one line per flag */
+export function flagSummaryLine(key: string, e: Evidence): { title: string; detail: string } {
+  const c = describeFlag(key, e)
+  return { title: c.title, detail: c.message.split('. ')[0] + '.' }
+}
