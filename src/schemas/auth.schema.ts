@@ -23,6 +23,15 @@ export const exchangeCodeSchema = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invalid sign-in code'),
 })
 
+export const verifyEmailSchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+})
+
+export const resetPasswordSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'This reset link is not valid'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+})
+
 export const forgotPasswordSchema = z.object({
   email: z.string().email('Invalid email address'),
 })

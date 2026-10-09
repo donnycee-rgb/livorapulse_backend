@@ -9,6 +9,8 @@ import {
   refreshSchema,
   forgotPasswordSchema,
   exchangeCodeSchema,
+  verifyEmailSchema,
+  resetPasswordSchema,
 } from '../schemas/auth.schema'
 import * as AuthService from '../services/AuthService'
 
@@ -60,8 +62,28 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, data: user })
   })
 
-  // POST /api/auth/forgot-password
-  app.post('/forgot-password', async (request, reply) => {
+  // POST /api/auth/verify-email — the 6-digit code from the sign-up email
+  app.post('/verify-email', { preHandler: authenticate, config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (request, reply) => {
+    const { code } = validate(verifyEmailSchema, request.body)
+    await AuthService.verifyEmailCode(request.user!.id, code)
+    return reply.send({ success: true, data: { verified: true } })
+  })
+
+  // POST /api/auth/resend-verification — a new code (one a minute, five an hour)
+  app.post('/resend-verification', { preHandler: authenticate }, async (request, reply) => {
+    await AuthService.sendVerificationCode(request.user!.id)
+    return reply.send({ success: true, data: { sent: true } })
+  })
+
+  // POST /api/auth/reset-password — new password from an emailed link
+  app.post('/reset-password', authRateLimit, async (request, reply) => {
+    const { token, password } = validate(resetPasswordSchema, request.body)
+    await AuthService.resetPassword(token, password)
+    return reply.send({ success: true, data: { reset: true } })
+  })
+
+  // POST /api/auth/forgot-password — always the same answer, account or not
+  app.post('/forgot-password', authRateLimit, async (request, reply) => {
     const body = validate(forgotPasswordSchema, request.body)
     await AuthService.forgotPassword(body.email)
     return reply.send({
