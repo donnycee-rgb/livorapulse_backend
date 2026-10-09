@@ -6,6 +6,7 @@
 import { betterSide, EXPERIMENT_DRIVERS, EXPERIMENT_SETTINGS, type CyclePhase, type FeatureKey, type Lag } from './config'
 import type { Split, TestResult } from './analyze'
 import type { ExperimentResult } from './experiment'
+import type { CycleSummary, MetricKey, MetricSummary } from './summary'
 
 // ─── Number formatting ──────────────────────────────────────────────────────
 
@@ -347,4 +348,93 @@ export function experimentResultText(r: Omit<ExperimentResult, 'text'>): string 
     parts.push(`You said you stuck to it on ${r.daysDone} of the ${plural(r.daysAnswered, 'day', 'days')} you checked in.`)
   }
   return parts.join(' ')
+}
+
+// ─── Health summary ─────────────────────────────────────────────────────────
+
+export const SUMMARY_DISCLAIMER = 'Self-tracked data from LivoraPulse. Not a diagnosis.'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "2026-09-28" → "28 Sep 2026" — unambiguous for any reader */
+export function formatDateLong(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]} ${y}`
+}
+
+/** Joins "a", "a and b", "a, b and c" */
+function listOf(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+const TREND_TEXT = {
+  higher: 'Higher in the second half of the period than the first.',
+  lower: 'Lower in the second half of the period than the first.',
+  steady: 'About the same through the period.',
+}
+
+/** A metric's display value as text: sleep as time, mood/stress to one decimal, walks in steps */
+export function formatSummaryValue(key: MetricKey, v: number): string {
+  if (key === 'sleep') return formatMinutes(v)
+  if (key === 'walks') return `${thousands(Math.round(v / 100) * 100)} steps`
+  return v.toFixed(1)
+}
+
+export const summaryText = {
+  metric(key: MetricKey, m: Omit<MetricSummary, 'text'>, periodDays: number): string {
+    if (m.daysLogged === 0) {
+      return key === 'walks' ? 'No walks recorded in this period.' : 'Not logged in this period.'
+    }
+    const f = (v: number) => formatSummaryValue(key, v)
+    const parts: string[] = []
+    switch (key) {
+      case 'sleep':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} nights. Average ${f(m.average!)} a night (range ${f(m.min!)} to ${f(m.max!)}).`,
+          `${plural(m.notableDays!, 'night', 'nights')} under 6h.`,
+        )
+        break
+      case 'mood':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} days. Average ${f(m.average!)} out of 5.`,
+          `Low (2 or below) on ${plural(m.notableDays!, 'day', 'days')}.`,
+        )
+        break
+      case 'stress':
+        parts.push(
+          `Logged on ${m.daysLogged} of ${periodDays} days. Average ${f(m.average!)} out of 5.`,
+          `High (4 or above) on ${plural(m.notableDays!, 'day', 'days')}.`,
+        )
+        break
+      case 'walks':
+        parts.push(
+          `Walks recorded on ${plural(m.daysLogged, 'day', 'days')}, averaging ${f(m.average!)} on those days.`,
+          'Counts recorded walks only, not all-day steps.',
+        )
+        break
+    }
+    if (m.trend) parts.push(TREND_TEXT[m.trend])
+    return parts.join(' ')
+  },
+
+  cycle(c: Omit<CycleSummary, 'text'>): string {
+    if (c.periodsLogged === 0) return 'Cycle tracking is on, but no periods were logged in this period.'
+    const parts = [`${plural(c.periodsLogged, 'period', 'periods')} logged; the last started on ${formatDateLong(c.lastPeriodStart!)}.`]
+    if (c.lengths.length > 0) {
+      parts.push(
+        `Cycle ${c.lengths.length === 1 ? 'length' : 'lengths'}: ${listOf(c.lengths.map(String))} days` +
+          (c.lengths.length > 1 ? ` (average ${c.averageLength}).` : '.'),
+      )
+      if (c.outsideTypicalRange > 0) {
+        parts.push(`${c.outsideTypicalRange} ${c.outsideTypicalRange === 1 ? 'cycle was' : 'cycles were'} outside the typical 21–35 day range.`)
+      }
+    }
+    const flows = Object.entries(c.flow).map(([k, n]) => `${k} ${n}`)
+    if (flows.length > 0) parts.push(`Flow: ${listOf(flows)}.`)
+    if (c.symptoms.length > 0) {
+      parts.push(`Symptoms logged: ${listOf(c.symptoms.slice(0, 6).map((s) => `${s.name} (${s.count})`))}.`)
+    }
+    return parts.join(' ')
+  },
 }
