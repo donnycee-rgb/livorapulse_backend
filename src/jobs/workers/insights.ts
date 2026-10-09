@@ -5,6 +5,7 @@ import { computeFeatures } from '../../services/FeatureService'
 import { refreshInsights } from '../../services/InsightService'
 import { completeDueExperiments } from '../../services/ExperimentService'
 import { deleteExpiredShares } from '../../services/HealthSummaryService'
+import { flagsEnabled, refreshFlags } from '../../services/FlagService'
 import { addDays, dayKey } from '../../utils/day'
 
 // ─── Job payload types ────────────────────────────────────────────────────────
@@ -53,7 +54,9 @@ export const insightsWorker = new Worker<InsightsJobData>(
     await computeFeatures(data.userId, addDays(data.today, -RECOMPUTE_DAYS), addDays(data.today, -1))
     const summary = await refreshInsights(data.userId, data.today)
     const finished = await completeDueExperiments(data.userId, data.today)
-    console.log(`[Insights] User ${data.userId}: ${summary.tested} tests, ${summary.active} active, ${finished} experiments finished`)
+    // Flags are only worked out once switched on (their wording is still in review)
+    const flags = flagsEnabled() ? await refreshFlags(data.userId, data.today) : 0
+    console.log(`[Insights] User ${data.userId}: ${summary.tested} tests, ${summary.active} active, ${finished} experiments finished, ${flags} flags`)
   },
   { connection: workerConnection },
 )

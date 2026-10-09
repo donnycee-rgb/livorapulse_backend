@@ -6,6 +6,7 @@ import { addDays, dayKey, startOfDay } from '../utils/day'
 import { AppError } from '../utils/response'
 import { loadFeatureDays } from './FeatureService'
 import { activeInsights } from './InsightService'
+import { flagsForSummary } from './FlagService'
 
 // ─── Builds the user's health summary and manages share links ──────────────
 
@@ -19,7 +20,7 @@ export async function buildSummaryFor(userId: string, months: SummaryMonths, inc
   const from = addDays(today, -SUMMARY_DAYS[months])
   const range = { gte: startOfDay(from), lt: startOfDay(today) }
 
-  const [user, days, periods, insights, moodNotes, cycleNotes] = await Promise.all([
+  const [user, days, periods, insights, flags, moodNotes, cycleNotes] = await Promise.all([
     prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: { name: true, profile: { select: { dateOfBirth: true, gender: true } } },
@@ -31,6 +32,7 @@ export async function buildSummaryFor(userId: string, months: SummaryMonths, inc
       select: { periodStartDate: true, periodDuration: true, flowIntensity: true, symptoms: true },
     }),
     activeInsights(userId, 5),
+    flagsForSummary(userId),
     // Notes are read only when the user asked to include them
     includeNotes
       ? prisma.moodLog.findMany({ where: { userId, timestamp: range, note: { not: null } }, select: { note: true, timestamp: true } })
@@ -64,7 +66,7 @@ export async function buildSummaryFor(userId: string, months: SummaryMonths, inc
       symptoms: p.symptoms,
     })),
     insights: insights.map((i) => i.text),
-    flags: [],
+    flags,
     notes,
   })
 }
