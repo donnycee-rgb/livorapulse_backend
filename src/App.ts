@@ -105,11 +105,25 @@ export async function buildApp(): Promise<FastifyInstance> {
                 name,
                 email,
                 avatarUrl,
-                // Google users have no password
+                // Google users have no password, and Google has confirmed the email
                 passwordHash: null,
+                emailVerifiedAt: new Date(),
                 preferences: { create: {} },
               },
             })
+          } else if (!user.emailVerifiedAt) {
+            // An unconfirmed account with this email: whoever made it never
+            // proved they own the address, but this Google sign-in does. Drop
+            // the unconfirmed password and sign out its sessions, so an account
+            // set up in someone else's name can't be used to get into theirs.
+            const [updated] = await prisma.$transaction([
+              prisma.user.update({
+                where: { id: user.id },
+                data: { emailVerifiedAt: new Date(), passwordHash: null, avatarUrl: user.avatarUrl ?? avatarUrl },
+              }),
+              prisma.refreshToken.updateMany({ where: { userId: user.id, revoked: false }, data: { revoked: true } }),
+            ])
+            user = updated
           } else if (avatarUrl && !user.avatarUrl) {
             // Update avatar if not set
             user = await prisma.user.update({
