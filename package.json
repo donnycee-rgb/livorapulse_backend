@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "insights:backfill": "node dist/scripts/backfillInsights.js",
-    "insights:backfill:dev": "tsx src/scripts/backfillInsights.ts"
+    "insights:backfill:dev": "tsx src/scripts/backfillInsights.ts",
+    "test:db": "vitest run --config vitest.db.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.3.1",
@@ -40,6 +41,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-socket": "0.2.11",
     "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.9",
