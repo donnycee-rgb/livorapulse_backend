@@ -19,6 +19,10 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 })
 
+export const exchangeCodeSchema = z.object({
+  code: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invalid sign-in code'),
+})
+
 export const forgotPasswordSchema = z.object({
   email: z.string().email('Invalid email address'),
 })

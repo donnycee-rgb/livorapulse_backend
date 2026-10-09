@@ -8,6 +8,7 @@ import {
   logoutSchema,
   refreshSchema,
   forgotPasswordSchema,
+  exchangeCodeSchema,
 } from '../schemas/auth.schema'
 import * as AuthService from '../services/AuthService'
 
@@ -29,8 +30,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, ...result })
   })
 
-  // POST /api/auth/logout  (requires valid access token)
-  app.post('/logout', { preHandler: authenticate }, async (request, reply) => {
+  // POST /api/auth/logout
+  // The refresh token is the credential here: by the time someone logs out
+  // their 15-minute access token has often expired, and requiring it meant
+  // the refresh token was never revoked.
+  app.post('/logout', async (request, reply) => {
     const body = validate(logoutSchema, request.body)
     await AuthService.logout(body.refreshToken)
     return reply.send({ success: true, message: 'Logged out' })
@@ -40,6 +44,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post('/refresh', async (request, reply) => {
     const body = validate(refreshSchema, request.body)
     const tokens = await AuthService.refresh(body.refreshToken)
+    return reply.send({ success: true, ...tokens })
+  })
+
+  // POST /api/auth/exchange — swap the one-time code from Google sign-in for tokens
+  app.post('/exchange', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (request, reply) => {
+    const { code } = validate(exchangeCodeSchema, request.body)
+    const tokens = await AuthService.exchangeLoginCode(code)
     return reply.send({ success: true, ...tokens })
   })
 
@@ -78,10 +89,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const oauthUser = request.user!
-      const tokens = await AuthService.issueTokensForUser(oauthUser.id, oauthUser.email)
-      return reply.redirect(
-        `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/dashboard?token=${tokens.accessToken}`,
-      )
+      const code = await AuthService.createLoginCode(oauthUser.id, oauthUser.email)
+      return reply.redirect(`${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/dashboard?code=${code}`)
     },
   )
 }
