@@ -50,7 +50,7 @@ async function buildUserContext(userId: string): Promise<string> {
       where: { userId, startedAt: range },
       select: { durationSec: true, kind: true },
     }),
-    prisma.moodLog.findFirst({
+    prisma.moodLog.findMany({
       where: { userId, timestamp: range },
       orderBy: { timestamp: 'desc' },
       select: { emoji: true, stressScore: true },
@@ -82,6 +82,10 @@ async function buildUserContext(userId: string): Promise<string> {
   ])
 
   const { goals, streak } = score
+
+  // A check-in can hold mood, stress or both — take the latest of each
+  const todayEmoji = todayMood.find((m) => m.emoji !== null)?.emoji ?? null
+  const todayStress = todayMood.find((m) => m.stressScore !== null)?.stressScore ?? null
 
   // ── Today's totals (there can be several entries per day) ───────────────
   const steps = todayPhysical.reduce((s, e) => s + e.steps, 0)
@@ -156,7 +160,7 @@ TODAY'S DATA:
   
   Focus time: ${focusMin}min / ${goals.goalFocusMinutes}min goal
   
-  Mood: ${todayMood?.emoji ?? 'not logged'} | Stress: ${todayMood ? `${todayMood.stressScore}/10 (1 = very calm, 10 = very stressed)` : 'not logged'}
+  Mood: ${todayEmoji ?? 'not logged'} | Stress: ${todayStress !== null ? `${todayStress}/10 (1 = very calm, 10 = very stressed)` : 'not logged'}
   
   Eco actions today: ${todayEco.length} (${todayEco.map((e: EcoItem) => e.type).join(', ') || 'none'})
   
