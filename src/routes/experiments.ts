@@ -23,7 +23,7 @@ export async function experimentRoutes(app: FastifyInstance): Promise<void> {
   app.post('/:id/checkin', async (request, reply) => {
     const { id } = validate(experimentIdParamsSchema, request.params)
     const body = validate(experimentCheckinSchema, request.body)
-    await checkIn(request.user!.id, id, body.did, body.day ?? 'today')
+    await checkIn(request.user!.id, id, body.did, body.day)
     return reply.send({ success: true, data: await listExperiments(request.user!.id) })
   })
 

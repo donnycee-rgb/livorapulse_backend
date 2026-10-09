@@ -4,6 +4,7 @@ import { insightsQueue } from '../queue'
 import { computeFeatures } from '../../services/FeatureService'
 import { refreshInsights } from '../../services/InsightService'
 import { completeDueExperiments } from '../../services/ExperimentService'
+import { deleteExpiredShares } from '../../services/HealthSummaryService'
 import { addDays, dayKey } from '../../utils/day'
 
 // ─── Job payload types ────────────────────────────────────────────────────────
@@ -40,6 +41,10 @@ export const insightsWorker = new Worker<InsightsJobData>(
         await insightsQueue.add(`user-insights-${user.id}-${today}`, { userId: user.id, today })
       }
       console.log(`[Insights] Dispatched ${users.length} user jobs for ${today}`)
+
+      // Expired share links hold health data nobody can open any more
+      const expired = await deleteExpiredShares()
+      if (expired > 0) console.log(`[Insights] Deleted ${expired} expired summary links`)
       return
     }
 

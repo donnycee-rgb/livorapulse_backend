@@ -23,6 +23,7 @@ import { scoreRoutes } from './routes/score'
 import { aiRoutes } from './routes/ai'
 import { insightRoutes } from './routes/insights'
 import { experimentRoutes } from './routes/experiments'
+import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -148,6 +149,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(aiRoutes, { prefix: '/api/ai' })
   await app.register(insightRoutes, { prefix: '/api/insights' })
   await app.register(experimentRoutes, { prefix: '/api/experiments' })
+  await app.register(summaryRoutes, { prefix: '/api/summary' })
+  await app.register(sharedSummaryRoutes, { prefix: '/api/shared/summary' })
 
   return app
 }
