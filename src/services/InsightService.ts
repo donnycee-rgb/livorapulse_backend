@@ -7,41 +7,18 @@ import {
   passesKeep,
   passesNew,
   passesReturn,
-  type FeatureDay,
   type TestResult,
 } from '../insights/analyze'
 import { INSIGHT_SETTINGS, type FeatureKey } from '../insights/config'
-import { AREA_LABEL, describeInsight, displayValue, outcomeScaleMax, pairLabel, progressMessage } from '../insights/wording'
-import { addDays, dayKey, startOfDay } from '../utils/day'
+import { AREA_LABEL, describeInsight, displayValue, experimentSuggestion, outcomeScaleMax, pairLabel, progressMessage } from '../insights/wording'
+import { loadFeatureDays } from './FeatureService'
+import { addDays, dayKey } from '../utils/day'
 
 // ─── Runs the analysis for a user and keeps their Insight rows up to date ───
 
-const FEATURE_SELECT = {
-  date: true,
-  sleepMinutes: true,
-  steps: true,
-  screenMinutes: true,
-  socialMinutes: true,
-  entertainmentMinutes: true,
-  focusMinutes: true,
-  studyMinutes: true,
-  moodValue: true,
-  stressScore: true,
-  caloriesIn: true,
-  waterGlasses: true,
-  ecoActions: true,
-  cyclePhase: true,
-  cycleDay: true,
-} as const
-
-async function loadFeatureDays(userId: string, today: string): Promise<FeatureDay[]> {
-  const rows = await prisma.dailyFeatures.findMany({
-    where: { userId, date: { gte: startOfDay(addDays(today, -INSIGHT_SETTINGS.windowDays - 1)), lt: startOfDay(today) } },
-    select: FEATURE_SELECT,
-    orderBy: { date: 'asc' },
-  })
-  return rows.map(({ date, cyclePhase, cycleDay, ...values }) => ({ date: dayKey(date), cyclePhase, cycleDay, values }))
-}
+/** Feature days in the analysis window, up to yesterday */
+const windowDays = (userId: string, today: string) =>
+  loadFeatureDays(userId, addDays(today, -INSIGHT_SETTINGS.windowDays - 1), addDays(today, -1))
 
 /** Fields written whenever a result is saved */
 function resultFields(r: TestResult) {
@@ -61,6 +38,7 @@ function resultFields(r: TestResult) {
     nDays: r.pairedDays,
     qValue: r.q!,
     text: copy.text,
+    splitValue: r.split?.value ?? null,
   }
 }
 
@@ -79,7 +57,7 @@ export interface RefreshSummary {
  */
 export async function refreshInsights(userId: string, today: string = dayKey()): Promise<RefreshSummary> {
   const [days, loggedCycles, existing] = await Promise.all([
-    loadFeatureDays(userId, today),
+    windowDays(userId, today),
     prisma.cycleLog.count({ where: { userId } }),
     prisma.insight.findMany({ where: { userId } }),
   ])
@@ -141,6 +119,8 @@ export interface InsightView {
   nDays: number
   feedback: string | null
   firstFoundAt: Date
+  /** The change to try in a 14-day experiment, or null if this insight has none */
+  suggestion: string | null
   /** The two bars, in the units the app shows (stress on 1–5) */
   comparison: {
     low: { label: string; value: number }
@@ -164,6 +144,7 @@ export function toView(i: Insight): InsightView {
     nDays: i.nDays,
     feedback: i.feedback,
     firstFoundAt: i.firstFoundAt,
+    suggestion: experimentSuggestion(i),
     comparison: {
       low: { label: i.groupLabelLow, value: round(displayValue(outcome, i.meanLow)) },
       high: { label: i.groupLabelHigh, value: round(displayValue(outcome, i.meanHigh)) },
@@ -201,7 +182,7 @@ export interface InsightStatus {
 
 export async function insightStatus(userId: string, today: string = dayKey()): Promise<InsightStatus> {
   const [days, loggedCycles, activeCount] = await Promise.all([
-    loadFeatureDays(userId, today),
+    windowDays(userId, today),
     prisma.cycleLog.count({ where: { userId } }),
     prisma.insight.count({ where: { userId, status: 'active' } }),
   ])

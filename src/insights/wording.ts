@@ -3,8 +3,9 @@
 // "causes"; always show the numbers and how many days they're based on.
 // All English strings live in this file so a Swahili version can sit beside it.
 
-import type { CyclePhase, FeatureKey, Lag } from './config'
+import { betterSide, EXPERIMENT_DRIVERS, EXPERIMENT_SETTINGS, type CyclePhase, type FeatureKey, type Lag } from './config'
 import type { Split, TestResult } from './analyze'
+import type { ExperimentResult } from './experiment'
 
 // ─── Number formatting ──────────────────────────────────────────────────────
 
@@ -240,4 +241,110 @@ export function progressMessage(driver: FeatureKey | 'cyclePhase', outcome: Feat
   const days = plural(daysNeeded, 'more day', 'more days')
   if (driver === 'cyclePhase') return `Keep logging your ${AREA_LABEL[outcome]} on ${days} to see how it changes across your cycle.`
   return `Log ${AREA_LABEL[driver]} and ${AREA_LABEL[outcome]} on ${days} to unlock your first insights.`
+}
+
+// ─── Experiments ────────────────────────────────────────────────────────────
+
+/**
+ * The change to try for 14 days, aiming for the side of the insight's split
+ * where the outcome was better. Null when there's nothing sensible to try
+ * (food, cycle phase, or an outcome with no better direction).
+ */
+export function experimentSuggestion(i: {
+  driver: string
+  outcome: string
+  meanLow: number
+  meanHigh: number
+  splitValue: number | null
+}): string | null {
+  const driver = i.driver as FeatureKey
+  if (i.splitValue === null || !EXPERIMENT_DRIVERS.includes(driver)) return null
+  const side = betterSide(i.outcome as FeatureKey, i.meanLow, i.meanHigh)
+  if (!side) return null
+  const v = formatDriver(driver, i.splitValue)
+  const n = Math.max(1, Math.round(i.splitValue))
+
+  if (side === 'high') {
+    switch (driver) {
+      case 'sleepMinutes': return `Sleep ${v} or more each night`
+      case 'steps': return `Walk ${v.replace(' steps', '+ steps')} a day, and log your walks`
+      case 'workMinutes': return `Do at least ${v} of focus or study time a day`
+      case 'waterGlasses': return `Drink at least ${plural(n, 'glass', 'glasses')} of water a day`
+      case 'ecoActions': return `Do at least ${plural(n, 'eco action', 'eco actions')} a day`
+      default: return null // more screen time is never the suggestion
+    }
+  }
+  switch (driver) {
+    case 'screenMinutes': return `Keep your screen time under ${v} a day`
+    case 'socialMinutes': return `Keep social media under ${v} a day`
+    case 'entertainmentMinutes': return `Keep entertainment screen time under ${v} a day`
+    case 'workMinutes': return `Keep focus and study under ${v} a day, with real breaks`
+    default: return null // less sleep, walking, water or eco actions is never the suggestion
+  }
+}
+
+const OUTCOME_PHRASE: Partial<Record<FeatureKey, string>> = {
+  stressScore: 'your stress',
+  moodValue: 'your mood',
+  sleepMinutes: 'your sleep',
+  focusMinutes: 'your focus time',
+  steps: 'your logged walks',
+}
+
+const DRIVER_PHRASE: Partial<Record<FeatureKey, string>> = {
+  sleepMinutes: 'your sleep',
+  steps: 'your logged walks',
+  screenMinutes: 'your screen time',
+  socialMinutes: 'your social media time',
+  entertainmentMinutes: 'your entertainment time',
+  workMinutes: 'your focus and study time',
+  waterGlasses: 'your water',
+  ecoActions: 'your eco actions',
+}
+
+/** A driver average: minutes as time, counts to one decimal */
+function formatDriverAverage(driver: FeatureKey, v: number): string {
+  if (driver === 'waterGlasses') return `${v.toFixed(1)} glasses a day`
+  if (driver === 'ecoActions') return `${v.toFixed(1)} a day`
+  return formatDriver(driver, v)
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/** The plain-language result shown when an experiment ends — given whatever happened */
+export function experimentResultText(r: Omit<ExperimentResult, 'text'>): string {
+  const outcomePhrase = OUTCOME_PHRASE[r.outcome] ?? 'the result'
+  const scale = r.outcome === 'stressScore' || r.outcome === 'moodValue' ? ' out of 5' : ''
+  const parts: string[] = []
+
+  if (r.verdict === 'not-enough-data') {
+    parts.push(
+      `There wasn't enough ${AREA_LABEL[r.outcome]} logged to compare: it needs at least ${EXPERIMENT_SETTINGS.minDaysPerPeriod} days in each two-week period, ` +
+        `and you logged ${plural(r.before.days, 'day', 'days')} before and ${plural(r.during.days, 'day', 'days')} during.`,
+    )
+  } else {
+    const before = formatOutcome(r.outcome, r.before.mean!)
+    const during = formatOutcome(r.outcome, r.during.mean!)
+    if (r.verdict === 'no-clear-change') {
+      parts.push(
+        `${cap(outcomePhrase)} averaged ${during}${scale} during the experiment and ${before} in the 14 days before. ` +
+          "That's within your normal ups and downs, so there was no clear change this time. That's a useful result too.",
+      )
+    } else {
+      const direction = r.difference! > 0 ? 'up' : 'down'
+      const ending = r.verdict === 'improved'
+        ? "That's a clear change, though other things in your life may have changed over those weeks too."
+        : 'It went the other way this time, which is worth knowing too.'
+      parts.push(`During the experiment, ${outcomePhrase} averaged ${during}${scale}, ${direction} from ${before} in the 14 days before. ${ending}`)
+    }
+  }
+
+  const dp = DRIVER_PHRASE[r.driver]
+  if (dp && r.driverBefore.mean !== null && r.driverDuring.mean !== null) {
+    parts.push(`${cap(dp)} averaged ${formatDriverAverage(r.driver, r.driverDuring.mean)} during, compared with ${formatDriverAverage(r.driver, r.driverBefore.mean)} before.`)
+  }
+  if (r.daysAnswered > 0) {
+    parts.push(`You said you stuck to it on ${r.daysDone} of the ${plural(r.daysAnswered, 'day', 'days')} you checked in.`)
+  }
+  return parts.join(' ')
 }

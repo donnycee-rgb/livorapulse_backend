@@ -106,3 +106,40 @@ export const INSIGHT_SETTINGS = {
 }
 
 export type InsightSettings = typeof INSIGHT_SETTINGS
+
+// ─── Experiments ────────────────────────────────────────────────────────────
+
+/** Which way is an improvement, for outcomes an experiment can test */
+export const BETTER: Partial<Record<FeatureKey, 'higher' | 'lower'>> = {
+  stressScore: 'lower',
+  moodValue: 'higher',
+  sleepMinutes: 'higher',
+  focusMinutes: 'higher',
+  steps: 'higher',
+}
+
+/** Drivers a user can change on purpose; food and cycle phase are left out */
+export const EXPERIMENT_DRIVERS: FeatureKey[] = [
+  'sleepMinutes', 'steps', 'screenMinutes', 'socialMinutes', 'entertainmentMinutes', 'workMinutes', 'waterGlasses', 'ecoActions',
+]
+
+export const EXPERIMENT_SETTINGS = {
+  days: 14,
+  /** Days with the outcome logged, in each period, before a result is given */
+  minDaysPerPeriod: 5,
+  /** A change counts as clear below this p-value (one test, so no correction) and above the outcome's minimum effect */
+  maxP: 0.05,
+  permutations: 2000,
+}
+
+/**
+ * Which side of the split the user should aim for, given an insight's
+ * group means: the side where the outcome was better. Null when the
+ * outcome has no better direction.
+ */
+export function betterSide(outcome: FeatureKey, meanLow: number, meanHigh: number): 'low' | 'high' | null {
+  const better = BETTER[outcome]
+  if (!better || meanLow === meanHigh) return null
+  const highIsBetter = better === 'higher' ? meanHigh > meanLow : meanHigh < meanLow
+  return highIsBetter ? 'high' : 'low'
+}
