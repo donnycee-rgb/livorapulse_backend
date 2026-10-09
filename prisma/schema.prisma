@@ -31,6 +31,7 @@ model User {
   waterLogs            WaterLog[]
   dailyFeatures        DailyFeatures[]
   insights             Insight[]
+  experiments          Experiment[]
 }
 
 model RefreshToken {
@@ -252,9 +253,48 @@ model Insight {
   status          String   @default("active") // active | stale | dismissed
   feedback        String? // "useful" | "not-true" | null
   dismissedEffect Float? // effect when dismissed — it only returns if much stronger
+  splitValue      Float? // the driver value the groups were split at (null for cycle phase)
   firstFoundAt    DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@unique([userId, key])
   @@index([userId, status])
+}
+
+// A 14-day test of a change suggested by an insight. The result compares the
+// insight's outcome during the experiment with the 14 days before it.
+model Experiment {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  insightKey    String // the pair being tested, e.g. "socialMinutes->focusMinutes:same-day"
+  driver        String
+  outcome       String
+  lag           String
+  change        String // what the user is trying, e.g. "Keep social media under 2h a day"
+  baselineStart DateTime // local day starts (utils/day.ts), like DailyFeatures.date
+  baselineEnd   DateTime
+  startDate     DateTime
+  endDate       DateTime // day 14
+  status        String   @default("active") // active | completed | stopped
+  result        Json? // filled in when completed — see services/ExperimentService.ts
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  checkins ExperimentCheckin[]
+
+  @@index([userId, status])
+}
+
+// "Did you do it today?" — one answer per experiment day
+model ExperimentCheckin {
+  id           String     @id @default(cuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  date         DateTime // local day start
+  did          Boolean
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([experimentId, date])
 }
