@@ -36,7 +36,26 @@ async function issueTokens(userId: string, email: string): Promise<TokenPair> {
   return { accessToken, refreshToken }
 }
 
-export async function issueTokensForUser(userId: string, email: string): Promise<TokenPair> {
+// ─── Google sign-in hand-off ─────────────────────────────────────────────────
+// After Google sign-in the browser is redirected to the app. Putting tokens in
+// that URL would leave them in browser history and server logs, so the URL
+// carries a one-time code instead, which the app swaps for tokens straight away.
+
+const LOGIN_CODE_TTL_SEC = 60
+const loginCodeKey = (code: string) => `login_code:${code}`
+
+/** A single-use code, valid for 60 seconds, that the app exchanges for tokens */
+export async function createLoginCode(userId: string, email: string): Promise<string> {
+  const code = crypto.randomBytes(32).toString('base64url')
+  await redis.set(loginCodeKey(code), JSON.stringify({ userId, email }), 'EX', LOGIN_CODE_TTL_SEC)
+  return code
+}
+
+export async function exchangeLoginCode(code: string): Promise<TokenPair> {
+  // GETDEL: the code works once, even if two requests race
+  const raw = await redis.getdel(loginCodeKey(code))
+  if (!raw) throw new AppError('UNAUTHORIZED', 'This sign-in link has expired. Please sign in again.', 401)
+  const { userId, email } = JSON.parse(raw) as { userId: string; email: string }
   return issueTokens(userId, email)
 }
 
