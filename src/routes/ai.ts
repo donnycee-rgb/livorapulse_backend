@@ -7,7 +7,7 @@ import { activeInsights } from '../services/InsightService'
 import { computeDailyScore } from '../services/ScoreService'
 import { AppError } from '../utils/response'
 import { computeCyclePhase, computeSmartAverage } from './cycle'
-import { APP_TIMEZONE, dayBounds } from '../utils/day'
+import { APP_TIMEZONE, dayBounds, dayKey } from '../utils/day'
 
 // ---------------------------------------------------------------------------
 // Local types for reduce/map callbacks
@@ -38,6 +38,7 @@ async function buildUserContext(userId: string): Promise<string> {
     recentCycles,
     score,
     topInsights,
+    runningExperiment,
   ] = await Promise.all([
     prisma.userProfile.findUnique({
       where: { userId },
@@ -85,6 +86,7 @@ async function buildUserContext(userId: string): Promise<string> {
     }),
     computeDailyScore(userId),
     activeInsights(userId, 3),
+    prisma.experiment.findFirst({ where: { userId, status: 'active' }, select: { change: true, startDate: true } }),
   ])
 
   const { goals, streak } = score
@@ -93,12 +95,18 @@ async function buildUserContext(userId: string): Promise<string> {
   const insightLines = topInsights.map((i) =>
     i.driver === 'cyclePhase' ? `  - (cycle — private, only discuss if asked) ${i.text}` : `  - ${i.text}`,
   )
-  const insightsContext = insightLines.length > 0
+  const experimentDay = runningExperiment
+    ? Math.round((Date.parse(`${dayKey()}T00:00:00Z`) - Date.parse(`${dayKey(runningExperiment.startDate)}T00:00:00Z`)) / 86400000) + 1
+    : 0
+  const experimentLine = runningExperiment && experimentDay <= 14
+    ? `\n  Running a 14-day experiment (day ${experimentDay} of 14): "${runningExperiment.change}". Encourage them to stick with it and answer "Did you do it today?" on their Insights page.`
+    : ''
+  const insightsContext = insightLines.length > 0 || experimentLine
     ? `
 PATTERNS IN THIS USER'S OWN DATA (from their Insights page, strongest first):
-${insightLines.join('\n')}
-  These are links in their logs, not proven causes. When relevant, explain them in plain words and suggest a
-  small 14-day experiment to test one (e.g. "try no phone after 10pm for two weeks and see if your sleep changes").
+${insightLines.join('\n') || '  (none yet)'}${experimentLine}
+  These are links in their logs, not proven causes. When relevant, explain them in plain words and suggest
+  trying a 14-day experiment from the Insights page to test one.
 `
     : ''
 

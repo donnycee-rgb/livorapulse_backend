@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma'
 import { insightsQueue } from '../queue'
 import { computeFeatures } from '../../services/FeatureService'
 import { refreshInsights } from '../../services/InsightService'
+import { completeDueExperiments } from '../../services/ExperimentService'
 import { addDays, dayKey } from '../../utils/day'
 
 // ─── Job payload types ────────────────────────────────────────────────────────
@@ -46,7 +47,8 @@ export const insightsWorker = new Worker<InsightsJobData>(
     // Logs ids and counts only — never health values or insight text
     await computeFeatures(data.userId, addDays(data.today, -RECOMPUTE_DAYS), addDays(data.today, -1))
     const summary = await refreshInsights(data.userId, data.today)
-    console.log(`[Insights] User ${data.userId}: ${summary.tested} tests, ${summary.active} active`)
+    const finished = await completeDueExperiments(data.userId, data.today)
+    console.log(`[Insights] User ${data.userId}: ${summary.tested} tests, ${summary.active} active, ${finished} experiments finished`)
   },
   { connection: workerConnection },
 )
