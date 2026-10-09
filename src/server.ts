@@ -5,6 +5,7 @@ import { redis } from './db/redis'
 import { registerRepeatableJobs } from './jobs/queue'
 import { dailySummaryWorker } from './jobs/workers/dailySummary'
 import { streakWorker } from './jobs/workers/streak'
+import { insightsWorker } from './jobs/workers/insights'
 
 const PORT = parseInt(process.env.PORT ?? '4000', 10)
 const HOST = process.env.HOST ?? '0.0.0.0'
@@ -37,7 +38,7 @@ async function start(): Promise<void> {
   }
 
   // ── Start workers (log only — they self-initialise on import) ────────────
-  console.log(`✓ Workers ready — dailySummary: ${dailySummaryWorker.isRunning()}, streak: ${streakWorker.isRunning()}`)
+  console.log(`✓ Workers ready — dailySummary: ${dailySummaryWorker.isRunning()}, streak: ${streakWorker.isRunning()}, insights: ${insightsWorker.isRunning()}`)
 
   // ── Build and start Fastify ───────────────────────────────────────────────
   const app = await buildApp()
@@ -58,6 +59,7 @@ async function start(): Promise<void> {
       app.close(),
       dailySummaryWorker.close(),
       streakWorker.close(),
+      insightsWorker.close(),
       prisma.$disconnect(),
       redis.quit(),
     ])
