@@ -142,16 +142,8 @@ function windowKeys(today: string, windowDays: number): string[] {
   return keys
 }
 
-function testPair(
-  pair: PairConfig,
-  byDate: Map<string, FeatureDay>,
-  keys: string[],
-  yesterday: string,
-  settings: InsightSettings,
-): TestResult {
-  const key = pairKey(pair)
-  const base: TestResult = { key, kind: 'pair', driver: pair.driver, outcome: pair.outcome, lag: pair.lag, pairedDays: 0, testable: false }
-
+/** The days where both values exist, after the lag, with each pair's weekday/weekend stratum */
+function collectPair(pair: PairConfig, byDate: Map<string, FeatureDay>, keys: string[], yesterday: string) {
   const x: number[] = []
   const y: number[] = []
   const strata: string[] = []
@@ -165,6 +157,20 @@ function testPair(
     y.push(ov)
     strata.push(`${isWeekend(d) ? 'we' : 'wd'}-${isWeekend(outDay) ? 'we' : 'wd'}`)
   }
+  return { x, y, strata }
+}
+
+function testPair(
+  pair: PairConfig,
+  byDate: Map<string, FeatureDay>,
+  keys: string[],
+  yesterday: string,
+  settings: InsightSettings,
+): TestResult {
+  const key = pairKey(pair)
+  const base: TestResult = { key, kind: 'pair', driver: pair.driver, outcome: pair.outcome, lag: pair.lag, pairedDays: 0, testable: false }
+
+  const { x, y, strata } = collectPair(pair, byDate, keys, yesterday)
   base.pairedDays = x.length
   if (x.length < settings.minPairedDays) return base
 
@@ -279,6 +285,48 @@ export function analyzeUser(days: FeatureDay[], opts: AnalyzeOptions): TestResul
   const q = benjaminiHochberg(tested.map((r) => r.p!))
   tested.forEach((r, i) => { r.q = q[i] })
   return results
+}
+
+export interface PairProgress {
+  key: string
+  driver: FeatureKey | 'cyclePhase'
+  outcome: FeatureKey
+  pairedDays: number
+}
+
+/**
+ * How many usable days each test has, without running it — cheap enough for
+ * the progress endpoint. Cycle tests count days with a known phase and outcome.
+ */
+export function pairProgress(days: FeatureDay[], opts: AnalyzeOptions): PairProgress[] {
+  const settings = opts.settings ?? INSIGHT_SETTINGS
+  const pairs = opts.pairs ?? PAIRS
+  const byDate = new Map(days.map((d) => [d.date, d]))
+  const keys = windowKeys(opts.today, settings.windowDays)
+  const yesterday = addDays(opts.today, -1)
+
+  const out: PairProgress[] = pairs.map((p) => ({
+    key: pairKey(p),
+    driver: p.driver,
+    outcome: p.outcome,
+    pairedDays: collectPair(p, byDate, keys, yesterday).x.length,
+  }))
+  if (opts.loggedCycles >= settings.minLoggedCycles) {
+    for (const outcome of CYCLE_OUTCOMES) {
+      const n = keys.filter((d) => {
+        const day = byDate.get(d)
+        return !!day?.cyclePhase && valueOf(day, outcome) !== null
+      }).length
+      out.push({ key: `cyclePhase->${outcome}`, driver: 'cyclePhase', outcome, pairedDays: n })
+    }
+  }
+  return out
+}
+
+/** Days in the window where the value was logged */
+export function loggedDays(days: FeatureDay[], key: FeatureKey, today: string, windowDays = INSIGHT_SETTINGS.windowDays): number {
+  const from = addDays(today, -windowDays)
+  return days.filter((d) => d.date >= from && d.date < today && valueOf(d, key) !== null).length
 }
 
 // ─── Deciding what to show ───────────────────────────────────────────────────
