@@ -117,8 +117,10 @@ model MoodLog {
   id          String   @id @default(cuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emoji       String
-  stressScore Int
+  // Each is null when the user didn't set it in this check-in — one tap
+  // records one answer, never a leftover default for the other
+  emoji       String?
+  stressScore Int?
   note        String?
   timestamp   DateTime @default(now())
 }

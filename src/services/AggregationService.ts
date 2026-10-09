@@ -105,13 +105,15 @@ export async function productivityWeekly(userId: string): Promise<ProductivityAg
 
 export async function moodWeekly(userId: string): Promise<MoodAggregate[]> {
   const logs = await prisma.moodLog.findMany({
-    where: { userId, timestamp: { gte: sevenDaysAgo() } },
+    // Mood-only check-ins have no stress score — leave them out of the average
+    where: { userId, timestamp: { gte: sevenDaysAgo() }, stressScore: { not: null } },
     select: { stressScore: true, timestamp: true },
     orderBy: { timestamp: 'asc' },
   })
 
   const grouped = new Map<string, { date: string; sum: number; count: number }>()
   for (const l of logs) {
+    if (l.stressScore === null) continue
     const key = toDateKey(l.timestamp)
     const existing = grouped.get(key) ?? { date: key, sum: 0, count: 0 }
     grouped.set(key, { date: key, sum: existing.sum + l.stressScore, count: existing.count + 1 })

@@ -100,12 +100,21 @@ export function productivityScore(focusMinutes: number, productiveScreenMinutes:
 
 const EMOJI_SCORE: Record<string, number> = { '😄': 100, '🙂': 75, '😐': 50, '😕': 25, '😣': 0 }
 
-/** 60% how you feel (emoji), 40% stress (1 = calm → 100, 10 = very stressed → 0). Averaged over the day's logs. */
-export function moodScore(logs: { emoji: string; stressScore: number }[]): number {
-  if (logs.length === 0) return 0
-  const feel = logs.reduce((s, l) => s + (EMOJI_SCORE[l.emoji] ?? 50), 0) / logs.length
-  const avgStress = logs.reduce((s, l) => s + l.stressScore, 0) / logs.length
-  const calm = clamp(((10 - avgStress) / 9) * 100, 0, 100)
+/**
+ * 60% how you feel (emoji), 40% stress (1 = calm → 100, 10 = very stressed → 0). Averaged over the day's logs.
+ * A log can hold just one of the two; if only one was given all day, it makes up the whole score.
+ */
+export function moodScore(logs: { emoji: string | null; stressScore: number | null }[]): number {
+  const feels = logs.flatMap((l) => (l.emoji !== null ? [EMOJI_SCORE[l.emoji] ?? 50] : []))
+  const stresses = logs.flatMap((l) => (l.stressScore !== null ? [l.stressScore] : []))
+  if (feels.length === 0 && stresses.length === 0) return 0
+
+  const feel = feels.length > 0 ? feels.reduce((s, v) => s + v, 0) / feels.length : null
+  const calm = stresses.length > 0
+    ? clamp(((10 - stresses.reduce((s, v) => s + v, 0) / stresses.length) / 9) * 100, 0, 100)
+    : null
+  if (feel === null) return calm!
+  if (calm === null) return feel
   return feel * 0.6 + calm * 0.4
 }
 
