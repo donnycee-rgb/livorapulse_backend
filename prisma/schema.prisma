@@ -32,6 +32,7 @@ model User {
   dailyFeatures        DailyFeatures[]
   insights             Insight[]
   experiments          Experiment[]
+  sharedSummaries      SharedSummary[]
 }
 
 model RefreshToken {
@@ -297,4 +298,25 @@ model ExperimentCheckin {
   updatedAt    DateTime   @updatedAt
 
   @@unique([experimentId, date])
+}
+
+// A health summary the user chose to share as a link. Holds a snapshot of
+// exactly what they previewed. Only a hash of the link's token is stored, so
+// the link can't be rebuilt from the database. Deleted when revoked, and
+// removed by the nightly job once expired.
+model SharedSummary {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique // sha256 of the token in the link
+  months       Int
+  includeNotes Boolean
+  data         Json // the summary as previewed
+  expiresAt    DateTime
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
