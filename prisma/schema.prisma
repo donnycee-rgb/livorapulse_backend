@@ -33,6 +33,7 @@ model User {
   insights             Insight[]
   experiments          Experiment[]
   sharedSummaries      SharedSummary[]
+  healthFlags          HealthFlag[]
 }
 
 model RefreshToken {
@@ -319,4 +320,22 @@ model SharedSummary {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// A "worth getting checked" prompt raised by a conservative rule (see
+// insights/flags.ts). One row per user per kind of flag, kept so a dismissed
+// flag stays quiet and a resolved one can come back if the pattern returns.
+model HealthFlag {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key           String // "low-mood" | "short-sleep" | "cycle-length" | "missed-period" | "heavy-flow"
+  status        String // active | dismissed | resolved
+  evidence      Json // the numbers behind it, used to word the message
+  firstRaisedAt DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  dismissedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([userId, key])
 }
