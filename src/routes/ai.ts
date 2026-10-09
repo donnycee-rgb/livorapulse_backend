@@ -1,7 +1,11 @@
 import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
+import { validate } from '../middleware/validate'
 import { prisma } from '../db/prisma'
+import { aiChatSchema } from '../schemas/ai.schema'
+import { activeInsights } from '../services/InsightService'
 import { computeDailyScore } from '../services/ScoreService'
+import { AppError } from '../utils/response'
 import { computeCyclePhase, computeSmartAverage } from './cycle'
 import { APP_TIMEZONE, dayBounds } from '../utils/day'
 
@@ -33,6 +37,7 @@ async function buildUserContext(userId: string): Promise<string> {
     cycleLatest,
     recentCycles,
     score,
+    topInsights,
   ] = await Promise.all([
     prisma.userProfile.findUnique({
       where: { userId },
@@ -79,9 +84,23 @@ async function buildUserContext(userId: string): Promise<string> {
       select: { periodStartDate: true, periodDuration: true, actualCycleLength: true },
     }),
     computeDailyScore(userId),
+    activeInsights(userId, 3),
   ])
 
   const { goals, streak } = score
+
+  // Patterns found in the user's own data (Insights page), strongest first
+  const insightLines = topInsights.map((i) =>
+    i.driver === 'cyclePhase' ? `  - (cycle — private, only discuss if asked) ${i.text}` : `  - ${i.text}`,
+  )
+  const insightsContext = insightLines.length > 0
+    ? `
+PATTERNS IN THIS USER'S OWN DATA (from their Insights page, strongest first):
+${insightLines.join('\n')}
+  These are links in their logs, not proven causes. When relevant, explain them in plain words and suggest a
+  small 14-day experiment to test one (e.g. "try no phone after 10pm for two weeks and see if your sleep changes").
+`
+    : ''
 
   // A check-in can hold mood, stress or both — take the latest of each
   const todayEmoji = todayMood.find((m) => m.emoji !== null)?.emoji ?? null
@@ -169,7 +188,7 @@ TODAY'S DATA:
   Water: ${waterGlasses} / 8 glasses
   
   Current streak: ${streak} day${streak !== 1 ? 's' : ''} (targets x${score.multiplier})
-${cycleContext}
+${cycleContext}${insightsContext}
 
 GOALS FOR TODAY (already adjusted for the streak):
   Steps/day: ${goals.goalStepsPerDay}
@@ -197,13 +216,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/ai/chat
   app.post('/chat', async (request, reply) => {
     const userId = request.user!.id
-    const { messages } = request.body as {
-      messages: Array<{ role: 'user' | 'assistant'; content: string }>
-    }
-
-    if (!messages?.length) {
-      return reply.status(400).send({ success: false, error: 'No messages provided' })
-    }
+    const { messages } = validate(aiChatSchema, request.body)
 
     // Build context — inject as system message
     const systemContext = await buildUserContext(userId)
@@ -211,7 +224,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
     // Call Anthropic API
     const anthropicKey = process.env.ANTHROPIC_API_KEY
     if (!anthropicKey) {
-      return reply.status(500).send({ success: false, error: 'AI service not configured' })
+      throw new AppError('AI_NOT_CONFIGURED', 'AI service not configured', 500)
     }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -230,9 +243,9 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
     })
 
     if (!response.ok) {
-      const err = await response.text()
-      console.error('[AI Coach] Anthropic error:', err)
-      return reply.status(502).send({ success: false, error: 'AI service temporarily unavailable' })
+      // Status only — the error body can echo the conversation, which is health data
+      console.error(`[AI Coach] Anthropic error: HTTP ${response.status}`)
+      throw new AppError('AI_UNAVAILABLE', 'AI service temporarily unavailable', 502)
     }
 
     const data = await response.json() as {
