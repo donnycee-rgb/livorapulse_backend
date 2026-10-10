@@ -198,10 +198,13 @@ export function nutritionScore(totalCalories: number, goalCalories: number): num
 
 // ─── Insight ─────────────────────────────────────────────────────────────────
 
-function buildInsight(c: ScoreComponents, logged: Record<Dimension, boolean>, goals: Goals, streak: number): string {
+function buildInsight(c: ScoreComponents, logged: Record<Dimension, boolean>, goals: Goals, streak: number, hasScore: boolean): string {
   const loggedCount = Object.values(logged).filter(Boolean).length
   if (loggedCount === 0) {
-    return 'Nothing logged yet today — log a walk, a meal or your mood to start building your score.'
+    // The score covers the last 7 days, so early in the day it's already there
+    return hasScore
+      ? "Nothing logged yet today. Your score is based on your last 7 days — log a walk, a meal or your mood to keep it up to date."
+      : 'Nothing logged yet — log a walk, a meal or your mood to start your LifePulse Score.'
   }
 
   if (streak >= 7) {
@@ -315,7 +318,6 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
   }
 
   const todayScore = weightedScore(components)
-  const insight = buildInsight(components, logged, goals, streak)
 
   // ── Rolling 7-day score ──────────────────────────────────────────────────
   // Today's areas count only if logged; earlier days come from their saved
@@ -336,6 +338,7 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
   }
   const rolling = rollingComponents([{ ageDays: 0, components: todayLogged }, ...byDay.values()])
   const score = rollingScore(rolling)
+  const insight = buildInsight(components, logged, goals, streak, score !== null)
 
   // ── Persist so the history shows exactly what the user saw ───────────────
   // Area scores are saved as null when not logged, so later days can tell
