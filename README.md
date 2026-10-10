@@ -64,22 +64,26 @@ Run the frontend alongside it; Vite forwards `/api` to port 4000.
 | `BCRYPT_ROUNDS` | | Default `12` |
 | `APP_TIMEZONE` | | Defines a "day". Default `Africa/Nairobi` |
 | `ANTHROPIC_API_KEY` | | AI coach. Without it the coach is unavailable |
-| `MAIL_RELAY_URL`, `MAIL_RELAY_SECRET` | prod | Email sending, see below |
+| `EMAILJS_SERVICE_ID`, `EMAILJS_PUBLIC_KEY`, `EMAILJS_PRIVATE_KEY` | prod | Email sending, see below |
+| `EMAILJS_TEMPLATE_VERIFY`, `EMAILJS_TEMPLATE_RESET` | prod | EmailJS template IDs for the sign-up code and reset link |
 | `HEALTH_FLAGS_ENABLED` | | `false` until signed off |
 
 ---
 
 ## Email
 
-Sign-up codes and password reset links are sent through a small **Google Apps
-Script web app** that sends with Gmail from the account that deployed it. The
-backend writes each email (`src/services/EmailService.ts`) and posts it to the
-script with a shared secret.
+Sign-up codes and password reset links are sent from the server through
+[EmailJS](https://www.emailjs.com)'s REST API (`src/services/EmailService.ts`),
+never from the browser, so codes and reset tokens are never exposed to it.
 
-Setup steps, limits and error codes: [`mail-relay/README.md`](mail-relay/README.md).
+In EmailJS:
+- Create an email service (e.g. a Gmail connection) and two templates: one
+  for the sign-up code (`code`) and one for the reset link (`reset_link`).
+  Both also receive `to_email`, `to_name`, `expires_minutes` and `app_name`.
+- Under **Account → Security**, allow API calls from non-browser applications.
 
-Without `MAIL_RELAY_URL` / `MAIL_RELAY_SECRET`, development prints codes and
-links to the console; production refuses to send.
+Without the `EMAILJS_*` settings, development prints codes and links to the
+console; production refuses to send.
 
 ---
 
@@ -126,7 +130,7 @@ The full list is in `src/routes/`.
 src/
   App.ts, server.ts   app setup and entry point (also starts the workers)
   routes/             HTTP routes (thin)
-  services/           business logic: auth, email, score, insights, PDF…
+  services/           business logic: auth, email (EmailJS), score, insights, PDF…
   insights/           the pattern engine (pure functions, no database)
   jobs/               BullMQ queues and workers
   schemas/            Zod request validation
@@ -134,7 +138,6 @@ src/
   db/                 Prisma and Redis clients
   data/               Kenyan food list
 prisma/               schema, migrations, seed
-mail-relay/           Google Apps Script that sends email
 test/                 unit tests; test/db/ runs against a real Postgres
 ```
 
