@@ -84,6 +84,8 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
         name: input.name,
         email: input.email,
         passwordHash,
+        // Email confirmation is switched off for now (see EMAIL_VERIFICATION_DISABLED)
+        emailVerifiedAt: new Date(),
         preferences: { create: {} },
       },
       select: { id: true, name: true, email: true, emailVerifiedAt: true },
@@ -92,9 +94,8 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
   })
 
   const tokens = await issueTokens(user.id, user.email)
-  // The account exists either way; if the email fails, the app offers "send again"
-  const verificationSent = await sendVerificationCode(user.id).then(() => true, () => false)
-  return { user, ...tokens, verificationSent }
+  // Email confirmation is switched off for now — no code email is sent
+  return { user, ...tokens, verificationSent: false }
 }
 
 export async function login(input: LoginInput): Promise<AuthResult> {
@@ -114,8 +115,11 @@ export async function login(input: LoginInput): Promise<AuthResult> {
     data: { revoked: true },
   })
 
+  // Email confirmation is switched off for now: confirm anyone who signed up while it was on
+  const emailVerifiedAt = user.emailVerifiedAt ?? (await confirmEmailNow(user.id))
+
   const tokens = await issueTokens(user.id, user.email)
-  return { user: { id: user.id, name: user.name, email: user.email, emailVerifiedAt: user.emailVerifiedAt }, ...tokens }
+  return { user: { id: user.id, name: user.name, email: user.email, emailVerifiedAt }, ...tokens }
 }
 
 export async function logout(refreshToken: string): Promise<void> {
@@ -259,7 +263,19 @@ export async function resetPassword(token: string, password: string): Promise<vo
   ])
 }
 
+/**
+ * EMAIL_VERIFICATION_DISABLED: email sending isn't working yet, so accounts
+ * count as confirmed. Users who signed up while confirmation was on are
+ * confirmed the next time they log in or the app loads their profile.
+ */
+async function confirmEmailNow(userId: string): Promise<Date> {
+  const now = new Date()
+  await prisma.user.updateMany({ where: { id: userId, emailVerifiedAt: null }, data: { emailVerifiedAt: now } })
+  return now
+}
+
 export async function getMe(userId: string): Promise<object> {
+  await confirmEmailNow(userId)
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
