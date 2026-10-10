@@ -1,5 +1,5 @@
 import { prisma } from '../db/prisma'
-import { dayBounds } from '../utils/day'
+import { addDays, dayBounds, dayKey, startOfDay } from '../utils/day'
 import { applyStreak, resolveGoals, type Goals } from './GoalService'
 import { computeStreak, getStreakMultiplier } from './StreakService'
 
@@ -16,12 +16,24 @@ export interface ScoreComponents {
 
 export type Dimension = keyof ScoreComponents
 
+export type RollingComponents = Record<Dimension, number | null>
+
 export interface DailyScoreResult {
   date: string
-  score: number
+  /**
+   * The LifePulse Score: the last 7 days, recent days counting most (see
+   * rollingComponents). It doesn't reset at midnight. Null until anything
+   * has been logged in the last 7 days.
+   */
+  score: number | null
+  /** Each area's 7-day value behind the score; null = not tracked this week (left out) */
+  rolling: RollingComponents
+  /** Today only, the old way (unlogged areas count 0). Kept for comparison */
+  todayScore: number
   insight: string
+  /** Today's area scores, for the "today's goals" cards; unlogged areas are 0 */
   components: ScoreComponents
-  /** Which dimensions have at least one log today — unlogged ones score 0 */
+  /** Which dimensions have at least one log today */
   logged: Record<Dimension, boolean>
   /** Today's goals after the streak multiplier — what each component is measured against */
   goals: Goals
@@ -48,6 +60,55 @@ export function weightedScore(c: ScoreComponents): number {
   const total = (Object.keys(SCORE_WEIGHTS) as Dimension[])
     .reduce((sum, k) => sum + (c[k] ?? 0) * SCORE_WEIGHTS[k], 0)
   return Math.round(clamp(total, 0, 100))
+}
+
+// ─── Rolling 7-day score ─────────────────────────────────────────────────────
+// Wellbeing doesn't reset at midnight, so neither does the score. Each area
+// uses its scores from the last 7 days, today counting most and each earlier
+// day a little less. An area with no logs in that week is left out instead of
+// counting as 0, so not tracking something (e.g. eco) never costs points.
+
+export const ROLLING_DAYS = 7
+/** Weight of a day `n` days ago: today 1, yesterday 0.8, … 6 days ago 0.26 */
+export const DAY_DECAY = 0.8
+
+export interface ComponentDay {
+  /** 0 = the day being scored, 1 = the day before, … */
+  ageDays: number
+  /** null (or missing) = that area wasn't logged that day */
+  components: Partial<Record<Dimension, number | null>>
+}
+
+const DIMENSIONS = Object.keys(SCORE_WEIGHTS) as Dimension[]
+
+export function rollingComponents(days: ComponentDay[]): RollingComponents {
+  const out = {} as RollingComponents
+  for (const d of DIMENSIONS) {
+    let sum = 0
+    let weights = 0
+    for (const day of days) {
+      const v = day.components[d]
+      if (v === null || v === undefined || day.ageDays < 0 || day.ageDays >= ROLLING_DAYS) continue
+      const w = DAY_DECAY ** day.ageDays
+      sum += v * w
+      weights += w
+    }
+    out[d] = weights > 0 ? Math.round(sum / weights) : null
+  }
+  return out
+}
+
+/** The weighted score over the tracked areas only; null if nothing was tracked this week */
+export function rollingScore(r: RollingComponents): number | null {
+  let total = 0
+  let weights = 0
+  for (const d of DIMENSIONS) {
+    const v = r[d]
+    if (v === null) continue
+    total += v * SCORE_WEIGHTS[d]
+    weights += SCORE_WEIGHTS[d]
+  }
+  return weights > 0 ? Math.round(clamp(total / weights, 0, 100)) : null
 }
 
 // ─── Component scores (0–100) ────────────────────────────────────────────────
@@ -137,10 +198,13 @@ export function nutritionScore(totalCalories: number, goalCalories: number): num
 
 // ─── Insight ─────────────────────────────────────────────────────────────────
 
-function buildInsight(c: ScoreComponents, logged: Record<Dimension, boolean>, goals: Goals, streak: number): string {
+function buildInsight(c: ScoreComponents, logged: Record<Dimension, boolean>, goals: Goals, streak: number, hasScore: boolean): string {
   const loggedCount = Object.values(logged).filter(Boolean).length
   if (loggedCount === 0) {
-    return 'Nothing logged yet today — log a walk, a meal or your mood to start building your score.'
+    // The score covers the last 7 days, so early in the day it's already there
+    return hasScore
+      ? "Nothing logged yet today. Your score is based on your last 7 days — log a walk, a meal or your mood to keep it up to date."
+      : 'Nothing logged yet — log a walk, a meal or your mood to start your LifePulse Score.'
   }
 
   if (streak >= 7) {
@@ -204,6 +268,14 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     }),
     computeStreak(userId, key),
   ])
+  const pastSummaries = await prisma.dailySummary.findMany({
+    where: { userId, date: { gte: startOfDay(addDays(key, -(ROLLING_DAYS - 1))), lt: start } },
+    orderBy: { updatedAt: 'asc' },
+    select: {
+      date: true, physicalScore: true, digitalScore: true, productivityScore: true,
+      moodScore: true, ecoScore: true, nutritionScore: true,
+    },
+  })
 
   const multiplier = getStreakMultiplier(streak)
   const goals = applyStreak(resolveGoals(profile), multiplier)
@@ -245,18 +317,40 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     nutrition: logged.nutrition ? Math.round(nutritionScore(totalCalories, goals.goalCaloriesPerDay)) : 0,
   }
 
-  const score = weightedScore(components)
-  const insight = buildInsight(components, logged, goals, streak)
+  const todayScore = weightedScore(components)
+
+  // ── Rolling 7-day score ──────────────────────────────────────────────────
+  // Today's areas count only if logged; earlier days come from their saved
+  // summaries (null = not logged that day)
+  const todayLogged = Object.fromEntries(DIMENSIONS.map((d) => [d, logged[d] ? components[d] : null])) as RollingComponents
+  // Older rows were keyed at UTC midnight and newer ones at local midnight —
+  // both map to the same local day, and the most recently updated row wins
+  const byDay = new Map<string, ComponentDay>()
+  for (const s of pastSummaries) {
+    const dk = dayKey(s.date)
+    byDay.set(dk, {
+      ageDays: Math.round((Date.parse(`${key}T00:00:00Z`) - Date.parse(`${dk}T00:00:00Z`)) / 86400000),
+      components: {
+        physical: s.physicalScore, digital: s.digitalScore, productivity: s.productivityScore,
+        mood: s.moodScore, eco: s.ecoScore, nutrition: s.nutritionScore,
+      },
+    })
+  }
+  const rolling = rollingComponents([{ ageDays: 0, components: todayLogged }, ...byDay.values()])
+  const score = rollingScore(rolling)
+  const insight = buildInsight(components, logged, goals, streak, score !== null)
 
   // ── Persist so the history shows exactly what the user saw ───────────────
+  // Area scores are saved as null when not logged, so later days can tell
+  // "not logged" from "logged and scored 0"
   const summary = {
     insightText: insight,
-    physicalScore: components.physical,
-    digitalScore: components.digital,
-    productivityScore: components.productivity,
-    moodScore: components.mood,
-    ecoScore: components.eco,
-    nutritionScore: components.nutrition,
+    physicalScore: todayLogged.physical,
+    digitalScore: todayLogged.digital,
+    productivityScore: todayLogged.productivity,
+    moodScore: todayLogged.mood,
+    ecoScore: todayLogged.eco,
+    nutritionScore: todayLogged.nutrition,
     score,
   }
   await prisma.dailySummary.upsert({
@@ -265,5 +359,5 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     update: summary,
   })
 
-  return { date: key, score, insight, components, logged, goals, streak, multiplier }
+  return { date: key, score, rolling, todayScore, insight, components, logged, goals, streak, multiplier }
 }

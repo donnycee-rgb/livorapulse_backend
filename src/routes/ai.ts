@@ -174,7 +174,8 @@ USER PROFILE:
   ${profile?.hasDisability ? 'Has physical limitations/disability' : ''}
 
 TODAY'S DATA:
-  LifePulse Score today: ${score.score}/100 (physical ${score.components.physical}, digital ${score.components.digital}, productivity ${score.components.productivity}, mood ${score.components.mood}, eco ${score.components.eco}, nutrition ${score.components.nutrition})
+  LifePulse Score (last 7 days, today counts most): ${score.score ?? 'not enough logged yet'}/100 (${(Object.entries(score.rolling) as [string, number | null][]).map(([k, v]) => `${k} ${v ?? 'not tracked'}`).join(', ')})
+  Today so far: physical ${score.components.physical}, digital ${score.components.digital}, productivity ${score.components.productivity}, mood ${score.components.mood}, eco ${score.components.eco}, nutrition ${score.components.nutrition}
   Not logged yet today: ${notLogged.join(', ') || 'nothing, everything is logged'}
 
   Steps: ${steps} / ${goals.goalStepsPerDay} goal

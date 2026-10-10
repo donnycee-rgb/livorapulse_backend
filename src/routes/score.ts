@@ -47,17 +47,21 @@ export async function scoreRoutes(app: FastifyInstance): Promise<void> {
     // both map to the same local day, and the most recently updated row wins.
     const byDay = new Map<string, number>()
     for (const s of summaries) {
-      byDay.set(
-        dayKey(s.date),
-        s.score ?? weightedScore({
+      const parts = [s.physicalScore, s.digitalScore, s.productivityScore, s.moodScore, s.ecoScore, s.nutritionScore]
+      if (s.score !== null) {
+        byDay.set(dayKey(s.date), s.score)
+      } else if (parts.some((p) => p !== null)) {
+        // Very old rows saved before the score column existed
+        byDay.set(dayKey(s.date), weightedScore({
           physical: s.physicalScore ?? 0,
           digital: s.digitalScore ?? 0,
           productivity: s.productivityScore ?? 0,
           mood: s.moodScore ?? 0,
           eco: s.ecoScore ?? 0,
           nutrition: s.nutritionScore ?? 0,
-        }),
-      )
+        }))
+      }
+      // A day with no score and nothing logged has nothing to show
     }
 
     const data = Array.from(byDay, ([date, score]) => ({ date, score }))
