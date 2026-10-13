@@ -50,7 +50,7 @@ describe('sendEmail', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe(RELAY_URL)
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ secret: 'secret_x', to: 'a@example.test', ...buildEmail('verify', params) })
+    expect(JSON.parse(init.body as string)).toEqual({ secret: 'secret_x', to: 'a@example.test', kind: 'verify', ...buildEmail('verify', params) })
   })
 
   it('throws when the relay refuses, logging the code but never the email', async () => {

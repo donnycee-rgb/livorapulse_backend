@@ -128,7 +128,7 @@ export async function sendEmail(kind: EmailKind, params: EmailParams): Promise<v
     const res = await fetch(process.env.MAIL_RELAY_URL!, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret: process.env.MAIL_RELAY_SECRET, to: params.to_email, ...message }),
+      body: JSON.stringify({ secret: process.env.MAIL_RELAY_SECRET, to: params.to_email, kind, ...message }),
       redirect: 'follow',
       signal: controller.signal,
     })

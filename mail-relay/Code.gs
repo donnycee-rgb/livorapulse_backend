@@ -15,7 +15,11 @@
  *   MAIL_REPLY_TO     Optional. Where replies go (e.g. a support address).
  *   MAIL_ENABLED      Optional. "false" stops all email.
  *
- * Request (POST, JSON):  { secret, to, subject, text, html }
+ * Create this script from a Google Sheet (Extensions > Apps Script) and every
+ * email it handles is recorded in a "Mail log" tab: time, recipient, type and
+ * result. Never the subject or body.
+ *
+ * Request (POST, JSON):  { secret, to, kind, subject, text, html }
  * Response (always 200): { ok: true } or { ok: false, code }
  */
 
@@ -46,16 +50,31 @@ function doPost(e) {
     if (secret.length < 32) return fail_('NOT_CONFIGURED');
     if (typeof body.secret !== 'string' || !safeEqual_(body.secret, secret)) return fail_('UNAUTHORIZED');
 
-    if (String(cfg_('MAIL_ENABLED', 'true')).toLowerCase() === 'false') return fail_('DISABLED');
-
+    // From here on the caller is the backend, so each result is logged
     var to = String(body.to || '').trim();
+    var kind = String(body.kind || '').slice(0, 20);
+    var result = send_(body, to);
+    log_(to, kind, result);
+    return result === 'SENT' ? json_({ ok: true }) : fail_(result);
+  } catch (err) {
+    // Log the error only, never the request: it holds codes and reset links
+    console.error('Mail relay failed: ' + (err && err.message ? err.message : err));
+    return fail_('SEND_FAILED');
+  }
+}
+
+// Sends one email. Returns 'SENT' or an error code. Never throws.
+function send_(body, to) {
+  try {
+    if (String(cfg_('MAIL_ENABLED', 'true')).toLowerCase() === 'false') return 'DISABLED';
+
     var subject = String(body.subject || '').replace(/[\r\n]+/g, ' ').slice(0, 200);
     var text = String(body.text || '');
     var html = String(body.html || '');
-    if (!RE_EMAIL.test(to) || to.indexOf(',') !== -1 || to.indexOf(';') !== -1) return fail_('BAD_RECIPIENT');
-    if (!subject || !text) return fail_('BAD_REQUEST');
+    if (!RE_EMAIL.test(to) || to.indexOf(',') !== -1 || to.indexOf(';') !== -1) return 'BAD_RECIPIENT';
+    if (!subject || !text) return 'BAD_REQUEST';
 
-    if (MailApp.getRemainingDailyQuota() < 1) return fail_('QUOTA_EXCEEDED');
+    if (MailApp.getRemainingDailyQuota() < 1) return 'QUOTA_EXCEEDED';
 
     var options = { name: cfg_('MAIL_SENDER_NAME', 'LivoraPulse') };
     if (html) options.htmlBody = html;
@@ -63,13 +82,56 @@ function doPost(e) {
     if (replyTo) options.replyTo = replyTo;
 
     MailApp.sendEmail(to, subject, text, options);
-    return json_({ ok: true });
+    return 'SENT';
   } catch (err) {
-    // Log the error only, never the request: it holds codes and reset links
     console.error('Mail relay failed: ' + (err && err.message ? err.message : err));
-    return fail_('SEND_FAILED');
+    return 'SEND_FAILED';
   }
 }
+
+// ------------------------------------------------------------------
+// Mail log (when the script belongs to a spreadsheet)
+// ------------------------------------------------------------------
+
+var LOG_SHEET = 'Mail log';
+var LOG_HEADERS = ['Time', 'To', 'Type', 'Result'];
+var LOG_MAX_ROWS = 5000;
+
+// Adds one row: when, who, which email, and whether it went. Never the
+// subject or body, which hold codes and reset links. Never throws, so a
+// logging problem cannot stop an email.
+function log_(to, kind, result) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return; // standalone script: nothing to log to
+    var sheet = ss.getSheetByName(LOG_SHEET) || createLogSheet_(ss);
+    sheet.appendRow([new Date(), guard_(to), guard_(kind), result]);
+    // Keep the newest rows only
+    var extra = sheet.getLastRow() - 1 - LOG_MAX_ROWS;
+    if (extra > 0) sheet.deleteRows(2, extra);
+  } catch (err) {
+    console.error('Mail log failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
+function createLogSheet_(ss) {
+  var sheet = ss.insertSheet(LOG_SHEET);
+  sheet.appendRow(LOG_HEADERS);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, LOG_HEADERS.length).setFontWeight('bold');
+  sheet.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+  return sheet;
+}
+
+// Stops a cell from being read as a formula
+function guard_(value) {
+  var s = value === null || value === undefined ? '' : String(value);
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
+// ------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------
 
 function safeEqual_(a, b) {
   if (a.length !== b.length) return false;
@@ -90,13 +152,16 @@ function fail_(code) {
 // Run manually from the Apps Script editor
 // ------------------------------------------------------------------
 
-// Sends one test email to the account running the script. Running it the
-// first time also asks for the "send email as you" permission.
+// Sends one test email to the account running the script and logs it.
+// Running it the first time also asks for the permissions the relay needs.
 function sendTestEmail() {
   var me = Session.getEffectiveUser().getEmail();
-  MailApp.sendEmail(me, '[TEST] LivoraPulse mail relay', 'The mail relay can send email from this account.', {
-    name: cfg_('MAIL_SENDER_NAME', 'LivoraPulse')
-  });
+  var result = send_({
+    subject: '[TEST] LivoraPulse mail relay',
+    text: 'The mail relay can send email from this account.'
+  }, me);
+  log_(me, 'test', result);
+  Logger.log('Result: %s', result);
   Logger.log('Sent a test email to %s. %s emails left today.', me, MailApp.getRemainingDailyQuota());
 }
 

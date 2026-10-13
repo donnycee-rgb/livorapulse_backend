@@ -2,27 +2,31 @@
 
 The backend sends sign-up codes and password reset links through this small
 Apps Script web app. The script sends each email with Gmail (`MailApp`) from
-the Google account that deploys it. No email API keys are needed.
+the Google account that deploys it, and records it in a **Mail log** tab of
+the spreadsheet it belongs to. No email API keys are needed.
 
 ```
-backend (EmailService.ts) ──POST {secret,to,subject,text,html}──▶ Apps Script ──MailApp──▶ inbox
+backend (EmailService.ts) ──POST {secret,to,kind,subject,text,html}──▶ Apps Script ──MailApp──▶ inbox
+                                                                           │
+                                                                           └──▶ "Mail log" tab: time · to · type · result
 ```
 
-The backend writes the emails. The relay only checks the secret and sends
-them, so you edit the wording in `src/services/EmailService.ts` without
+The backend writes the emails. The relay only checks the secret, sends, and
+logs, so you edit the wording in `src/services/EmailService.ts` without
 redeploying the script.
 
 ## Setup
 
 1. **Sign in as the sender account.** Use the Gmail account the emails should
-   come from (e.g. `livorapulse.app@gmail.com`).
-2. Go to <https://script.google.com>, create a **New project** and name it
-   `LivoraPulse mail relay`.
+   come from. Everything below is done in that account.
+2. Create a Google Sheet (e.g. `LivoraPulse mail`), then **Extensions → Apps Script**.
+   This makes a script that belongs to the sheet, so it can write the log.
 3. Replace `Code.gs` with [`Code.gs`](Code.gs) from this folder.
-4. **Project Settings** → tick **Show "appsscript.json" manifest file in editor**,
-   then replace that file with [`appsscript.json`](appsscript.json).
+4. **Project Settings** (gear icon) → tick **Show "appsscript.json" manifest file
+   in editor**, then replace that file with [`appsscript.json`](appsscript.json).
 5. In the editor, choose **`generateSecret`** → **Run**. Approve the permissions
-   when asked. Copy the value from the execution log.
+   when asked (send email, use this spreadsheet). Copy the value from the
+   execution log.
 6. **Project Settings → Script Properties**, add:
 
    | Property | Value |
@@ -31,7 +35,8 @@ redeploying the script.
    | `MAIL_SENDER_NAME` | `LivoraPulse` (optional) |
    | `MAIL_REPLY_TO` | support address for replies (optional) |
 
-7. Run **`sendTestEmail`**. A test email should land in the sender's inbox.
+7. Run **`sendTestEmail`**. A test email should land in the sender's inbox, and
+   a **Mail log** tab should appear in the sheet with a `SENT` row.
 8. **Deploy → New deployment** → type **Web app**.
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -45,7 +50,20 @@ redeploying the script.
    ```
 
 "Anyone" access is needed so the backend can call the script without a Google
-sign-in. Without the secret, the script refuses to send.
+sign-in. Without the secret, the script refuses to send and logs nothing.
+
+## The Mail log
+
+| Time | To | Type | Result |
+| --- | --- | --- | --- |
+| 2026-10-12 09:14:03 | someone@example.com | verify | SENT |
+| 2026-10-12 09:20:41 | other@example.com | reset | QUOTA_EXCEEDED |
+
+- One row per email the backend asks for. `Type` is `verify`, `reset` or `test`.
+- Subjects and bodies are never logged: they hold codes and reset links.
+- Only the newest 5,000 rows are kept.
+- Requests with a wrong secret are not logged (anyone could send them).
+- The log holds users' email addresses, so keep the sheet private.
 
 ## Updating the script
 
@@ -59,14 +77,16 @@ A *new* deployment gets a new URL.
   Google Workspace. Over the limit, the relay answers `QUOTA_EXCEEDED`.
 - To stop all email without redeploying, set `MAIL_ENABLED` to `false`.
 
-## Error codes
+## Results and error codes
 
 The relay always answers HTTP 200 and returns `{ ok: false, code }` on failure.
-The backend logs only the code, never the email.
+The backend logs only the code, never the email. The same codes appear in the
+**Result** column.
 
 | Code | Meaning |
 | --- | --- |
-| `UNAUTHORIZED` | `MAIL_RELAY_SECRET` doesn't match `RELAY_SECRET` |
+| `SENT` | Sent (log only; the backend sees `{ ok: true }`) |
+| `UNAUTHORIZED` | `MAIL_RELAY_SECRET` doesn't match `RELAY_SECRET` (not logged) |
 | `NOT_CONFIGURED` | `RELAY_SECRET` is missing or shorter than 32 characters |
 | `DISABLED` | `MAIL_ENABLED` is `false` |
 | `QUOTA_EXCEEDED` | daily Gmail limit reached |
