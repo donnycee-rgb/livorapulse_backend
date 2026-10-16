@@ -10,6 +10,7 @@ import {
 import { hashPassword, comparePassword } from '../utils/hash'
 import { AppError } from '../utils/response'
 import { sendEmail } from './EmailService'
+import { findUserIdByEmail } from '../utils/email'
 import type { RegisterInput, LoginInput } from '../schemas/auth.schema'
 
 export interface AuthUser {
@@ -73,8 +74,7 @@ export async function exchangeLoginCode(code: string): Promise<TokenPair> {
 }
 
 export async function register(input: RegisterInput): Promise<AuthResult> {
-  const existing = await prisma.user.findUnique({ where: { email: input.email } })
-  if (existing) throw new AppError('CONFLICT', 'Email is already in use', 409)
+  if (await findUserIdByEmail(input.email)) throw new AppError('CONFLICT', 'Email is already in use', 409)
 
   const passwordHash = await hashPassword(input.password)
 
@@ -98,8 +98,9 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
 }
 
 export async function login(input: LoginInput): Promise<AuthResult> {
-  const user = await prisma.user.findUnique({
-    where: { email: input.email },
+  const userId = await findUserIdByEmail(input.email)
+  const user = userId && await prisma.user.findUnique({
+    where: { id: userId },
     select: { id: true, name: true, email: true, passwordHash: true, emailVerifiedAt: true },
   })
 
@@ -213,7 +214,8 @@ const resetKey = (tokenHash: string) => `pw_reset:${tokenHash}`
 const resetUserKey = (userId: string) => `pw_reset_user:${userId}`
 
 export async function forgotPassword(email: string): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, email: true } })
+  const userId = await findUserIdByEmail(email)
+  const user = userId && await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true } })
   if (!user) return // same response as a real account, so emails can't be probed
 
   // One email a minute per account, so the form can't be used to flood someone's inbox
