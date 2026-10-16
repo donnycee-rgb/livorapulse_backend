@@ -25,6 +25,7 @@ import { insightRoutes } from './routes/insights'
 import { experimentRoutes } from './routes/experiments'
 import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 import { flagRoutes } from './routes/flags'
+import { findUserIdByEmail, normalizeEmail } from './utils/email'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -88,16 +89,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       },
       async (_accessToken, _refreshToken, profile, done) => {
         try {
-          const email = profile.emails?.[0]?.value
+          const rawEmail = profile.emails?.[0]?.value
           const name = profile.displayName ?? 'User'
           const avatarUrl = profile.photos?.[0]?.value ?? null
 
-          if (!email) {
+          if (!rawEmail) {
             return done(new Error('No email returned from Google'), undefined)
           }
+          const email = normalizeEmail(rawEmail)
 
           // Find or create the user
-          let user = await prisma.user.findUnique({ where: { email } })
+          const existingId = await findUserIdByEmail(email)
+          let user = existingId ? await prisma.user.findUnique({ where: { id: existingId } }) : null
 
           if (!user) {
             user = await prisma.user.create({
