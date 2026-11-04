@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify'
-import { searchLocalFoods } from '../data/kenyanFoods'
+import { KENYAN_FOODS, searchLocalFoods } from '../data/kenyanFoods'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { logNutritionSchema, logWaterSchema } from '../schemas/nutrition.schema'
@@ -88,6 +88,17 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
     const combined = [...localResults, ...globalMapped].slice(0, 10)
 
     return reply.send({ success: true, data: combined })
+  })
+
+  // GET /api/nutrition/local/:id — one food from the local database (used by
+  // photo scanning, which knows the food id). Values are per 100 g.
+  app.get('/local/:id', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const food = KENYAN_FOODS.find(f => f.id === id)
+    if (!food) {
+      return reply.status(404).send({ success: false, error: { message: 'Food not found' } })
+    }
+    return reply.send({ success: true, data: food })
   })
 
   // POST /api/nutrition — log a food entry
