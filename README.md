@@ -52,7 +52,8 @@ Run the frontend alongside it; Vite forwards `/api` to port 4000.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | ✓ | Postgres connection string |
+| `DATABASE_URL` | ✓ | Postgres connection string used by the app. On Supabase: the transaction pooler (port 6543) with `?pgbouncer=true` |
+| `DIRECT_URL` | ✓ | Connection used by migrations. On Supabase: the session pooler (port 5432). Locally, the same as `DATABASE_URL` |
 | `REDIS_URL` | ✓ | Rate limits, codes, streaks and background jobs |
 | `PORT`, `HOST` | | Default `4000` |
 | `NODE_ENV` | | `production` on Railway |
