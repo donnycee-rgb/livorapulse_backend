@@ -1,0 +1,5 @@
+# Runtime: the model and the nightly job
+numpy>=2.1
+psycopg[binary]>=3.2
+# Development: tests
+pytest>=8.3
