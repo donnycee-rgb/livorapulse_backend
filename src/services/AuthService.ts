@@ -11,6 +11,7 @@ import { hashPassword, comparePassword } from '../utils/hash'
 import { AppError } from '../utils/response'
 import { sendEmail } from './EmailService'
 import type { RegisterInput, LoginInput } from '../schemas/auth.schema'
+import { frontendUrl } from '../utils/frontendUrl'
 
 export interface AuthUser {
   id: string
@@ -229,7 +230,7 @@ export async function forgotPassword(email: string): Promise<void> {
   await redis.set(resetKey(tokenHash), user.id, 'EX', RESET_TTL_SEC)
   await redis.set(resetUserKey(user.id), tokenHash, 'EX', RESET_TTL_SEC)
 
-  const link = `${(process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/reset-password?token=${token}`
+  const link = `${frontendUrl()}/reset-password?token=${token}`
   try {
     await sendEmail('reset', { to_email: user.email, to_name: user.name, reset_link: link, expires_minutes: RESET_TTL_SEC / 60 })
   } catch {

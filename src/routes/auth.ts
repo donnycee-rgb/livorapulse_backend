@@ -13,6 +13,7 @@ import {
   resetPasswordSchema,
 } from '../schemas/auth.schema'
 import * as AuthService from '../services/AuthService'
+import { frontendUrl } from '../utils/frontendUrl'
 
 /** Tight rate limit applied to register and login to prevent brute-force. */
 const authRateLimit = { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }
@@ -106,13 +107,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     '/google/callback',
     {
       preValidation: FastifyPassport.authenticate('google', {
-        failureRedirect: `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/login?error=oauth_failed`,
+        failureRedirect: `${frontendUrl()}/login?error=oauth_failed`,
       }),
     },
     async (request, reply) => {
       const oauthUser = request.user!
       const code = await AuthService.createLoginCode(oauthUser.id, oauthUser.email)
-      return reply.redirect(`${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/dashboard?code=${code}`)
+      return reply.redirect(`${frontendUrl()}/dashboard?code=${code}`)
     },
   )
 }

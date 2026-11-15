@@ -26,6 +26,7 @@ import { experimentRoutes } from './routes/experiments'
 import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 import { flagRoutes } from './routes/flags'
 import { mlRoutes } from './routes/ml'
+import { frontendUrl } from './utils/frontendUrl'
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -44,10 +45,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(helmet, { global: true })
 
-  const frontendUrl = (process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(/\/$/, '')
-
   await app.register(cors, {
-    origin: frontendUrl,
+    origin: frontendUrl(),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
