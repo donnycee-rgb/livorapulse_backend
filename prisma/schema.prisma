@@ -43,6 +43,7 @@ model User {
   healthFlags          HealthFlag[]
   mlEffects            MlUserEffect[]
   mlPredictions        MlPrediction[]
+  mlModels             MlUserModel[]
 }
 
 model RefreshToken {
@@ -407,4 +408,21 @@ model MlPrediction {
 
   @@unique([userId, date, outcome])
   @@index([userId, date])
+}
+
+// Each user's fitted model, saved nightly so the API can forecast on demand
+// with what's been logged today (e.g. last night's sleep). The numbers and
+// the maths are in ml/livora_ml/model.py; src/services/MoodForecast.ts
+// repeats the forecast step, and a parity test keeps the two identical.
+model MlUserModel {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outcome      String // "mood"
+  params       Json // { features, scale, means, m, S, yMean, sigma2, n }
+  nDays        Int
+  modelVersion String
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([userId, outcome])
 }

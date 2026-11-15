@@ -235,3 +235,38 @@ def summarise_population(pop: Population) -> dict:
 def users_from_rows(rows_by_user: Mapping[str, Sequence[Mapping[str, object]]]) -> dict[str, UserData]:
     from .features import build_user
     return {uid: build_user(rows) for uid, rows in rows_by_user.items()}
+
+
+def user_params(pop: Population, post: UserPosterior) -> dict:
+    """Everything the API needs to forecast for this user on demand
+    (MlUserModel.params). src/services/MoodForecast.ts repeats forecast()
+    with these; ml/tests/fixtures/forecast_parity.json keeps them in step."""
+    from .features import FEATURE_NAMES
+    u = post.data
+    assert u is not None and u.n > 0
+    nan_to_none = lambda v: None if not np.isfinite(v) else float(v)
+    return {
+        "features": list(FEATURE_NAMES),
+        "scale": [float(v) for v in pop.scale],
+        "means": [nan_to_none(v) for v in u.means],
+        "m": [float(v) for v in post.m],
+        "S": [[float(v) for v in row] for row in post.S],
+        "yMean": float(u.y_mean),
+        "sigma2": float(pop.sigma2),
+        "n": int(u.n),
+    }
+
+
+def forecast_from_params(params: dict, today: Optional[Mapping[str, object]],
+                         yesterday: Optional[Mapping[str, object]], d: date) -> Forecast:
+    """forecast() from saved params, as the API does it."""
+    means = np.array([np.nan if v is None else v for v in params["means"]], dtype=float)
+    scale = np.array(params["scale"], dtype=float)
+    m = np.array(params["m"], dtype=float)
+    S = np.array(params["S"], dtype=float)
+    x = centred(row_inputs(today, yesterday, d)[None, :], means, scale)[0]
+    mean = params["yMean"] + float(x @ m)
+    var = params["sigma2"] + float(x @ S @ x) + params["sigma2"] / params["n"]
+    sd = float(np.sqrt(var))
+    clip = lambda v: float(min(MOOD_MAX, max(MOOD_MIN, v)))
+    return Forecast(mean=clip(mean), lower=clip(mean - Z80 * sd), upper=clip(mean + Z80 * sd), sd=sd)

@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../db/prisma'
 import { computeSmartAverage } from '../routes/cycle'
 import type { FeatureDay } from '../insights/analyze'
-import { buildDayFeatures, cycleForDay, emptyRawDay, isEmpty, type PeriodLog, type RawDay } from '../insights/features'
+import { buildDayFeatures, cycleForDay, emptyRawDay, isEmpty, type DayFeatures, type PeriodLog, type RawDay } from '../insights/features'
 import { addDays, dayKey, startOfDay } from '../utils/day'
 
 // ─── Builds and saves DailyFeatures rows from the raw logs ──────────────────
@@ -43,6 +43,43 @@ async function loadPeriods(userId: string): Promise<{ periods: PeriodLog[]; expe
  */
 export async function computeFeatures(userId: string, fromKey: string, toKey: string): Promise<number> {
   if (fromKey > toKey) return 0
+  const built = await buildFeatures(userId, fromKey, toKey)
+
+  const writes = []
+  const emptyDates: Date[] = []
+  for (const [key, f] of built) {
+    const date = startOfDay(key)
+    if (isEmpty(f)) {
+      emptyDates.push(date)
+      continue
+    }
+    const { symptoms, ...values } = f
+    writes.push(
+      prisma.dailyFeatures.upsert({
+        where: { userId_date: { userId, date } },
+        create: { userId, date, ...values, symptoms: symptoms ?? undefined },
+        update: { ...values, symptoms: symptoms ?? Prisma.JsonNull },
+      }),
+    )
+  }
+
+  // Cycle phase alone doesn't make a day worth keeping if nothing else was logged
+  await prisma.$transaction([
+    ...writes,
+    prisma.dailyFeatures.deleteMany({ where: { userId, date: { in: emptyDates } } }),
+  ])
+  return writes.length
+}
+
+/**
+ * The features for each local day from `fromKey` to `toKey` (inclusive),
+ * built from the raw logs without saving them. computeFeatures saves these;
+ * the live mood forecast uses them for today, which isn't saved until the
+ * following night.
+ */
+export async function buildFeatures(userId: string, fromKey: string, toKey: string): Promise<Map<string, DayFeatures>> {
+  const out = new Map<string, DayFeatures>()
+  if (fromKey > toKey) return out
   const range = { gte: startOfDay(fromKey), lt: startOfDay(addDays(toKey, 1)) }
 
   const [physical, digital, productivity, mood, nutrition, water, eco, cycle] = await Promise.all([
@@ -75,31 +112,10 @@ export async function computeFeatures(userId: string, fromKey: string, toKey: st
   water.forEach((e) => bucket(e.timestamp).water.push(e))
   eco.forEach((e) => bucket(e.timestamp).eco.push(e))
 
-  const writes = []
-  const emptyDates: Date[] = []
   for (const key of dayRange(fromKey, toKey)) {
-    const f = buildDayFeatures(days.get(key) ?? emptyRawDay(), cycleForDay(key, cycle.periods, cycle.expectedLength))
-    const date = startOfDay(key)
-    if (isEmpty(f)) {
-      emptyDates.push(date)
-      continue
-    }
-    const { symptoms, ...values } = f
-    writes.push(
-      prisma.dailyFeatures.upsert({
-        where: { userId_date: { userId, date } },
-        create: { userId, date, ...values, symptoms: symptoms ?? undefined },
-        update: { ...values, symptoms: symptoms ?? Prisma.JsonNull },
-      }),
-    )
+    out.set(key, buildDayFeatures(days.get(key) ?? emptyRawDay(), cycleForDay(key, cycle.periods, cycle.expectedLength)))
   }
-
-  // Cycle phase alone doesn't make a day worth keeping if nothing else was logged
-  await prisma.$transaction([
-    ...writes,
-    prisma.dailyFeatures.deleteMany({ where: { userId, date: { in: emptyDates } } }),
-  ])
-  return writes.length
+  return out
 }
 
 const FEATURE_SELECT = {

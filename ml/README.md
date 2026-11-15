@@ -68,7 +68,9 @@ yesterday's `DailyFeatures` at 00:30. It:
 2. fits the model,
 3. **replaces** every user's habit effects in `MlUserEffect`,
 4. writes **today's** mood forecast to `MlPrediction` (one row per user per day, kept),
-5. records the run in `MlModelRun`, including how earlier forecasts did against
+5. saves each user's fitted model to `MlUserModel`, so the API can re-forecast on
+   demand with what's been logged since (see below),
+6. records the run in `MlModelRun`, including how earlier forecasts did against
    the moods people then logged (`forecastRmse`, `forecastCoverage80`).
 
 Safeguards:
@@ -82,8 +84,21 @@ Safeguards:
 * **Limited login.** The job uses a database role that can read
   `DailyFeatures` and write the ML tables, nothing else (`sql/ml_role.sql`).
 
-Known limit: at 00:45 last night's sleep isn't in `DailyFeatures` yet (it's
-built the following night), so today's forecast uses the day before only.
+### Live forecast (last night's sleep)
+
+People log last night's sleep in the morning, after the job has run. So the
+API (`src/services/MoodForecast.ts`) re-forecasts on demand: it takes the
+user's saved model from `MlUserModel` and today's features built live from the
+raw logs (same rules as `DailyFeatures`, not saved), and returns
+`usesSleep: true` once sleep is logged. On simulated users, knowing last
+night's sleep roughly doubles the forecast's gain over "your average" (from
+~7% to 13–17% lower error).
+
+The forecast step exists in Python and in TypeScript. `python -m
+livora_ml.parity` writes `tests/fixtures/forecast_parity.json` (saved models,
+inputs, Python's answers); `test/moodForecast.test.ts` checks the API matches
+to 10 decimals, and a pytest checks the fixture is current. Change one side,
+regenerate, and the other side's test tells you what to update.
 
 `python -m livora_ml.job --dry-run` runs it on simulated users without a database.
 
@@ -91,7 +106,8 @@ built the following night), so today's forecast uses the day before only.
 
 1. Deploy the ML tables migration (merging to `main` makes Render run it).
 2. Supabase → **SQL Editor**: paste `ml/sql/ml_role.sql`, set a long
-   letters-and-digits password, **Run**.
+   letters-and-digits password, **Run**. (Set up before `MlUserModel` existed?
+   Run only `GRANT SELECT, INSERT, UPDATE, DELETE ON "MlUserModel" TO livora_ml;`)
 3. GitHub → this repo → **Settings → Secrets and variables → Actions → New
    repository secret**: name `ML_DATABASE_URL`, value
    `postgresql://livora_ml.<project-ref>:<password>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres`.
@@ -104,7 +120,7 @@ re-enable it in the Actions tab if that happens.
 ## Database
 
 Tables (owned by Prisma, `prisma/schema.prisma`): `MlModelRun`, `MlUserEffect`,
-`MlPrediction`. The job reads `DailyFeatures` and writes only these.
+`MlPrediction`, `MlUserModel`. The job reads `DailyFeatures` and writes only these.
 
 ## Running locally
 
@@ -116,6 +132,5 @@ Tables (owned by Prisma, `prisma/schema.prisma`): `MlModelRun`, `MlUserEffect`,
 
 ## Next
 
-1. Show effects and forecasts in the app.
-2. Daily suggestions chosen by Thompson sampling.
-3. Use last night's sleep in the morning forecast.
+1. Daily suggestions chosen by Thompson sampling.
+2. Change-point early warnings, drop-off prediction, nutrition optimisation.
