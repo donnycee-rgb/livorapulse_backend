@@ -127,6 +127,9 @@ def test_job_end_to_end_on_postgres(pg_url):
         assert status == "succeeded" and n_users == 12 and metrics["usersWithResults"] > 0
         n_eff = conn.execute('SELECT count(*) FROM "MlUserEffect"').fetchone()[0]
         assert n_eff == len(p.effects) > 0
+        n_models, params = conn.execute('SELECT count(*), (array_agg("params"))[1] FROM "MlUserModel"').fetchone()
+        assert n_models == metrics["usersWithResults"]
+        assert set(params) >= {"features", "scale", "means", "m", "S", "yMean", "sigma2", "n"}
         pred_dates = {r[0] for r in conn.execute('SELECT DISTINCT "date" FROM "MlPrediction"')}
         assert pred_dates == {db.to_stored(TODAY)}  # same day convention as the API
 
@@ -180,6 +183,7 @@ def test_ml_login_can_only_touch_what_it_needs(pg_url):
 
         as_ml('SELECT count(*) FROM "DailyFeatures"')
         as_ml('DELETE FROM "MlUserEffect" WHERE false')
+        as_ml('DELETE FROM "MlUserModel" WHERE false')
         as_ml('UPDATE "MlModelRun" SET "status" = "status" WHERE false')
         for forbidden in ('SELECT count(*) FROM "User"', 'SELECT count(*) FROM "MoodLog"',
                           'DELETE FROM "DailyFeatures" WHERE false', 'DELETE FROM "MlModelRun" WHERE false'):

@@ -2,9 +2,9 @@ name: ML tests
 
 on:
   push:
-    paths: ["ml/**", "prisma/**", ".github/workflows/ml-tests.yml"]
+    paths: ["ml/**", "prisma/**", "src/services/MoodForecast.ts", "test/moodForecast.test.ts", ".github/workflows/ml-tests.yml"]
   pull_request:
-    paths: ["ml/**", "prisma/**", ".github/workflows/ml-tests.yml"]
+    paths: ["ml/**", "prisma/**", "src/services/MoodForecast.ts", "test/moodForecast.test.ts", ".github/workflows/ml-tests.yml"]
 
 jobs:
   test:
@@ -29,5 +29,8 @@ jobs:
         working-directory: .
       - run: pip install -r requirements.txt
       - run: python -m pytest -q -rs
+      - name: API forecast matches Python (parity)
+        working-directory: .
+        run: npx vitest run test/moodForecast.test.ts
       - name: Model report on simulated users
         run: python -m livora_ml.evaluate >> "$GITHUB_STEP_SUMMARY"

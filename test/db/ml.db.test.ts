@@ -4,6 +4,9 @@ import { buildApp } from '../../src/App'
 import { prisma } from '../../src/db/prisma'
 import { addDays, dayKey, startOfDay } from '../../src/utils/day'
 import { signAccessToken } from '../../src/utils/jwt'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+import { forecastFromParams, type ModelParams } from '../../src/services/MoodForecast'
 
 // GET /api/ml/mood: reads what the nightly Python job wrote
 
@@ -66,7 +69,7 @@ describe('GET /api/ml/mood', () => {
 
   it("gives today's forecast, not an older one", async () => {
     const { data } = (await get(me)).json()
-    expect(data.forecast).toEqual({ date: today, mean: 3.6, lower: 2.9, upper: 4.3 })
+    expect(data.forecast).toEqual({ date: today, mean: 3.6, lower: 2.9, upper: 4.3, usesSleep: false })
     expect(data.lastRun.status).toBe('succeeded')
   })
 
@@ -76,5 +79,25 @@ describe('GET /api/ml/mood', () => {
     expect(data.effects).toEqual([])
     expect(data.forecast).toBeNull()
     expect(data.moodDays).toBe(0)
+  })
+
+  it("re-forecasts with last night's sleep once it's logged", async () => {
+    // A saved model (from the Python parity cases) for this user
+    const { cases } = JSON.parse(readFileSync(resolve(__dirname, '../../ml/tests/fixtures/forecast_parity.json'), 'utf8')) as { cases: { params: ModelParams }[] }
+    const params = cases[0].params
+    await prisma.mlUserModel.create({ data: { userId: me.id, outcome: 'mood', params, nDays: params.n, modelVersion: 'mood-hbr-1' } })
+
+    const before = (await get(me)).json().data.forecast
+    expect(before.usesSleep).toBe(false)
+    expect(before.mean).toBeCloseTo(forecastFromParams(params, null, null, today)!.mean, 10)
+
+    // Log last night's sleep this morning
+    await prisma.physicalActivityEntry.create({
+      data: { userId: me.id, steps: 0, distanceKm: 0, caloriesKcal: 0, sleepMinutes: 240, timestamp: new Date(startOfDay(today).getTime() + 7 * 3600_000) },
+    })
+    const after = (await get(me)).json().data.forecast
+    expect(after.usesSleep).toBe(true)
+    expect(after.mean).toBeCloseTo(forecastFromParams(params, { sleepMinutes: 240 }, null, today)!.mean, 10)
+    expect(after.mean).not.toBeCloseTo(before.mean, 3)
   })
 })

@@ -10,7 +10,9 @@ DailyFeatures (00:30). It:
 2. fits the mood model (model.py),
 3. replaces every user's habit effects (MlUserEffect),
 4. writes today's mood forecast for every user with enough history
-   (MlPrediction), and
+   (MlPrediction), and saves each user's fitted model (MlUserModel) so the
+   API can re-forecast during the day with what's been logged since,
+   e.g. last night's sleep, and
 5. records the run (MlModelRun), including how yesterday's forecasts did
    against the moods people actually logged.
 
@@ -30,7 +32,7 @@ from typing import Mapping, Optional, Sequence
 import numpy as np
 
 from .features import build_user
-from .model import MODEL_VERSION, effects_table, fit, forecast, summarise_population
+from .model import MODEL_VERSION, effects_table, fit, forecast, summarise_population, user_params
 
 OUTCOME = "mood"
 WINDOW_DAYS = 180  # history the model learns from
@@ -51,6 +53,7 @@ class Plan:
     metrics: dict = field(default_factory=dict)
     effects: list[dict] = field(default_factory=list)  # MlUserEffect rows (with userId)
     predictions: list[dict] = field(default_factory=list)  # MlPrediction rows (with userId, date)
+    models: list[dict] = field(default_factory=list)  # MlUserModel rows: the API forecasts on demand with these
 
 
 def _check_previous(previous: Sequence[Mapping], rows_by_user: Mapping[str, Sequence[Mapping]]) -> dict:
@@ -103,6 +106,7 @@ def plan(rows_by_user: Mapping[str, Sequence[Mapping]], today: date,
             continue
         for e in effects_table(pop, post):
             out.effects.append({"userId": uid, "outcome": OUTCOME, **e})
+        out.models.append({"userId": uid, "outcome": OUTCOME, "params": user_params(pop, post), "nDays": post.n})
         by_date = {r["date"]: r for r in rows_by_user[uid]}
         fc = forecast(pop, post, by_date.get(today), by_date.get(yesterday), today)
         if fc is not None:

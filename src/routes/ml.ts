@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
 import { prisma } from '../db/prisma'
 import { dayKey, startOfDay } from '../utils/day'
+import { liveMoodForecast } from '../services/MoodForecast'
 
 // Results of the nightly mood model (written by the Python job in ml/).
 // The API only reads them.
@@ -18,7 +19,7 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id
     const today = dayKey()
 
-    const [effects, prediction, lastRun] = await Promise.all([
+    const [effects, prediction, lastRun, live] = await Promise.all([
       prisma.mlUserEffect.findMany({
         where: { userId, outcome: OUTCOME, claim: { in: ['personal', 'typical'] } },
         select: { feature: true, unit: true, mean: true, sd: true, probPositive: true, claim: true, nDays: true, updatedAt: true },
@@ -31,6 +32,11 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
         where: { status: { in: ['succeeded', 'skipped'] } },
         orderBy: { startedAt: 'desc' },
         select: { status: true, finishedAt: true },
+      }),
+      // Re-forecast with today's logs (last night's sleep) when the user's model is saved
+      liveMoodForecast(userId, today).catch((err) => {
+        request.log.warn({ err }, 'live mood forecast failed; using the nightly one')
+        return null
       }),
     ])
 
@@ -45,7 +51,11 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
         minMoodDays: MIN_MOOD_DAYS,
         moodDays: effects[0]?.nDays ?? prediction?.nDays ?? 0,
         effects: effects.map(({ nDays: _n, ...e }) => e),
-        forecast: prediction ? { date: today, mean: prediction.mean, lower: prediction.lower, upper: prediction.upper } : null,
+        forecast: live
+          ? { date: today, mean: live.mean, lower: live.lower, upper: live.upper, usesSleep: live.usesSleep }
+          : prediction
+            ? { date: today, mean: prediction.mean, lower: prediction.lower, upper: prediction.upper, usesSleep: false }
+            : null,
         lastRun,
       },
     })

@@ -92,6 +92,7 @@ def write_results(conn: psycopg.Connection, run_id: str, plan: "Plan", model_ver
         for oc in outcomes:
             # Replace, not merge: users who no longer have enough data lose stale effects
             conn.execute('DELETE FROM "MlUserEffect" WHERE "outcome" = %s', (oc,))
+            conn.execute('DELETE FROM "MlUserModel" WHERE "outcome" = %s', (oc,))
         with conn.cursor() as cur:
             cur.executemany(
                 'INSERT INTO "MlUserEffect" ("id", "userId", "outcome", "feature", "unit", "mean", "sd", "probPositive", '
@@ -99,6 +100,11 @@ def write_results(conn: psycopg.Connection, run_id: str, plan: "Plan", model_ver
                 'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
                 [(_id(), e["userId"], e["outcome"], e["feature"], e["unit"], e["mean"], e["sd"], e["probPositive"],
                   e["ownShare"], e["claim"], e["nDays"], model_version, now) for e in plan.effects])
+            cur.executemany(
+                'INSERT INTO "MlUserModel" ("id", "userId", "outcome", "params", "nDays", "modelVersion", "updatedAt") '
+                'VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                [(_id(), mo["userId"], mo["outcome"], Jsonb(mo["params"]), mo["nDays"], model_version, now)
+                 for mo in plan.models])
             cur.executemany(
                 'INSERT INTO "MlPrediction" ("id", "userId", "date", "outcome", "mean", "lower", "upper", "nDays", "modelVersion") '
                 'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) '
