@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // App queries go through DATABASE_URL (on Supabase: the transaction pooler,
   // port 6543, with ?pgbouncer=true). Migrations need a session connection,
   // so they use DIRECT_URL (the session pooler, port 5432). Locally both can
@@ -41,6 +41,8 @@ model User {
   experiments          Experiment[]
   sharedSummaries      SharedSummary[]
   healthFlags          HealthFlag[]
+  mlEffects            MlUserEffect[]
+  mlPredictions        MlPrediction[]
 }
 
 model RefreshToken {
@@ -345,4 +347,64 @@ model HealthFlag {
   updatedAt     DateTime  @updatedAt
 
   @@unique([userId, key])
+}
+
+// ── Machine learning (written by the Python job in ml/, read by the API) ──
+// Prisma owns these tables; the Python job only reads DailyFeatures and
+// writes rows here, through a database login limited to that.
+
+// One run of the nightly model: which version, what it saw, how it did.
+model MlModelRun {
+  id           String    @id @default(cuid())
+  modelVersion String // e.g. "mood-hbr-1"
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  status       String    @default("running") // running | succeeded | failed
+  users        Int       @default(0)
+  rows         Int       @default(0)
+  population   Json? // fitted population means and spreads per feature
+  metrics      Json? // e.g. held-out error, so a worse model can be spotted
+  error        String?
+}
+
+// What one habit does to one person's outcome, with uncertainty. "For you,
+// each extra hour of sleep goes with +0.4 mood the next day (90% sure)."
+model MlUserEffect {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outcome      String // "mood"
+  feature      String // e.g. "sleepHours", matches ml/livora_ml/features.py
+  unit         String // what one step of the feature is, e.g. "1 hour of sleep"
+  mean         Float // change in the outcome per unit, posterior mean
+  sd           Float // posterior standard deviation
+  probPositive Float // P(effect > 0)
+  ownShare     Float // 0-1: how much of the certainty comes from this user's own days
+  claim        String // "personal" (say "for you") | "typical" ("for most people") | "unclear" (say nothing)
+  nDays        Int // days of this user's data behind it
+  modelVersion String
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@unique([userId, outcome, feature])
+  @@index([userId, outcome])
+}
+
+// The morning forecast for one day, made from last night's sleep and the
+// day before. Kept after the day, so forecasts can be checked against what
+// actually happened.
+model MlPrediction {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime // local day start, like DailyFeatures.date
+  outcome      String // "mood"
+  mean         Float
+  lower        Float // 80% predictive interval
+  upper        Float
+  nDays        Int
+  modelVersion String
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, date, outcome])
+  @@index([userId, date])
 }
