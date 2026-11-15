@@ -28,6 +28,20 @@ import { flagRoutes } from './routes/flags'
 import { mlRoutes } from './routes/ml'
 import { frontendUrl } from './utils/frontendUrl'
 
+/**
+ * The secret that signs the Google sign-in session cookie. In production a
+ * missing secret stops the server rather than falling back to a value anyone
+ * can read in this public repository. Locally a fixed one is fine.
+ */
+export function sessionSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const secret = env.SESSION_SECRET
+  if (secret && secret.length >= 32) return secret
+  if (env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET must be set to a random value of at least 32 characters')
+  }
+  return 'local-development-session-secret-not-for-production'
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     // Render (and most hosts) put a proxy in front of the app. Trusting it gives
@@ -64,7 +78,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ── Cookie + Session (required by @fastify/passport) ──────────────────────
   await app.register(fastifyCookie)
   await app.register(fastifySession, {
-    secret: process.env.SESSION_SECRET ?? 'fallback-secret-change-in-production',
+    secret: sessionSecret(),
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

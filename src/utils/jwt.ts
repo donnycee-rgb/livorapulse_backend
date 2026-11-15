@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 
 export interface TokenPayload {
@@ -20,6 +21,8 @@ export function signAccessToken(payload: TokenPayload): string {
 export function signRefreshToken(payload: TokenPayload): string {
   return jwt.sign(payload, requireSecret('JWT_REFRESH_SECRET'), {
     expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') as unknown as number,
+    // A random id makes every token unique, even two issued in the same second
+    jwtid: crypto.randomUUID(),
   })
 }
 
