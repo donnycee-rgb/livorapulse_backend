@@ -58,6 +58,49 @@ Typical result (200 users, 14–120 days each):
   90% intervals hold ~83–89% rather than 90%. The own-data rule above keeps
   this from reaching users.
 
+## The nightly job
+
+`python -m livora_ml.job` (`livora_ml/job.py`), run by GitHub Actions
+(`.github/workflows/ml-nightly.yml`) at **00:45 Nairobi**, after the API builds
+yesterday's `DailyFeatures` at 00:30. It:
+
+1. reads the last 180 days of `DailyFeatures`,
+2. fits the model,
+3. **replaces** every user's habit effects in `MlUserEffect`,
+4. writes **today's** mood forecast to `MlPrediction` (one row per user per day, kept),
+5. records the run in `MlModelRun`, including how earlier forecasts did against
+   the moods people then logged (`forecastRmse`, `forecastCoverage80`).
+
+Safeguards:
+
+* **Not enough data, no results.** Under 5 users with mood logged or 100 mood
+  days in total, the run is recorded as `skipped` and published results are
+  left alone. A user needs 5 mood days to get their own results.
+* **All or nothing.** Results are written in one transaction.
+* **Failures are recorded** (`status = failed`, with the error) and the
+  workflow fails, so GitHub emails you.
+* **Limited login.** The job uses a database role that can read
+  `DailyFeatures` and write the ML tables, nothing else (`sql/ml_role.sql`).
+
+Known limit: at 00:45 last night's sleep isn't in `DailyFeatures` yet (it's
+built the following night), so today's forecast uses the day before only.
+
+`python -m livora_ml.job --dry-run` runs it on simulated users without a database.
+
+### Setting it up (once)
+
+1. Deploy the ML tables migration (merging to `main` makes Render run it).
+2. Supabase → **SQL Editor**: paste `ml/sql/ml_role.sql`, set a long
+   letters-and-digits password, **Run**.
+3. GitHub → this repo → **Settings → Secrets and variables → Actions → New
+   repository secret**: name `ML_DATABASE_URL`, value
+   `postgresql://livora_ml.<project-ref>:<password>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres`.
+4. **Actions → ML nightly → Run workflow** to try it now. Expect `skipped`
+   until enough people have logged moods.
+
+GitHub pauses scheduled workflows in a repo with no commits for 60 days;
+re-enable it in the Actions tab if that happens.
+
 ## Database
 
 Tables (owned by Prisma, `prisma/schema.prisma`): `MlModelRun`, `MlUserEffect`,
@@ -68,13 +111,11 @@ Tables (owned by Prisma, `prisma/schema.prisma`): `MlModelRun`, `MlUserEffect`,
     cd ml
     python -m venv .venv
     .venv/Scripts/python -m pip install -r requirements.txt      # Windows
-    .venv/Scripts/python -m pytest -q
+    .venv/Scripts/python -m pytest -q     # database tests need node + npm ci in the repo root
     .venv/Scripts/python -m livora_ml.evaluate
 
 ## Next
 
-1. Nightly job: read `DailyFeatures` from Supabase, fit, write effects and
-   forecasts (GitHub Actions on a schedule, with a database login limited to
-   the ML tables).
-2. Show them in the app.
-3. Daily suggestions chosen by Thompson sampling.
+1. Show effects and forecasts in the app.
+2. Daily suggestions chosen by Thompson sampling.
+3. Use last night's sleep in the morning forecast.
