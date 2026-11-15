@@ -5,8 +5,8 @@ import { createShareSchema, shareIdParamsSchema, shareTokenParamsSchema, summary
 import { buildSummaryFor, createShare, listShares, openShare, revokeShare } from '../services/HealthSummaryService'
 import { renderSummaryPdf } from '../services/SummaryPdf'
 import type { HealthSummary } from '../insights/summary'
+import { frontendUrl } from '../utils/frontendUrl'
 
-const frontendUrl = () => (process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(/\/$/, '')
 
 /** Health data: never cached by browsers or proxies, never indexed */
 function privateHeaders(reply: FastifyReply): FastifyReply {
