@@ -9,6 +9,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { prisma } from './db/prisma'
 
 import { errorHandler } from './middleware/error'
+import { AppError } from './utils/response'
 import { authRoutes } from './routes/auth'
 import { userRoutes } from './routes/user'
 import { onboardingRoutes } from './routes/onboarding'
@@ -69,10 +70,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     global: true,
     max: 100,
     timeWindow: '1 minute',
-    errorResponseBuilder: () => ({
-      success: false,
-      error: { code: 'RATE_LIMITED', message: 'Too many requests — please slow down.' },
-    }),
+    // The plugin throws what this returns, so it must carry a status code:
+    // a plain object reached the error handler as an unknown error (a 500).
+    errorResponseBuilder: () => new AppError('RATE_LIMITED', 'Too many requests — please slow down.', 429),
   })
 
   // ── Cookie + Session (required by @fastify/passport) ──────────────────────
