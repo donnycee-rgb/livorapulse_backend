@@ -103,6 +103,14 @@ model PhysicalActivityEntry {
   distanceKm   Float    @default(0)
   caloriesKcal Int      @default(0)
   sleepMinutes Int      @default(0)
+  /// 'night' (last night: set or corrected, one per day) or 'nap' (each adds)
+  sleepType    String?
+  /// Another activity (gym, football…): what it was and for how long
+  activityType String?
+  durationMin  Int      @default(0)
+  /// That activity's credit toward the step goal (WHO: 1 min moderate ≈ 100
+  /// steps, vigorous counts double). Kept apart from real steps.
+  stepEquivalent Int    @default(0)
   trail        Json?
   note         String?
   timestamp    DateTime @default(now())
