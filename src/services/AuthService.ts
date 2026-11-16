@@ -31,12 +31,40 @@ export interface AuthResult extends TokenPair {
   verificationSent?: boolean
 }
 
+// ─── Refresh tokens ──────────────────────────────────────────────────────────
+// Only a SHA-256 hash of each refresh token is stored, so a copy of the
+// database can't be used to sign in. (A plain hash is enough: the tokens are
+// long random JWTs, not guessable passwords.)
+
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex')
+}
+
+/** Rows saved before hashing hold the token itself; match either until they expire (30 days) */
+function storedForms(token: string): string[] {
+  return [hashToken(token), token]
+}
+
+// A token that was REPLACED by a renewal and is then used again is a sign it
+// was stolen: the thief and the real user each hold a copy. Redis remembers
+// when each token was replaced, until it would have expired anyway. Tokens
+// cancelled by signing out or signing in elsewhere have no such mark, so an
+// old tab using one is just turned away. So are two tabs renewing at the same
+// moment: a token replaced in the last minute.
+const REPLACED_GRACE_MS = 60_000
+const replacedKey = (hash: string) => `rt:replaced:${hash}`
+
+/** Redis calls get a short deadline; the database is the source of truth */
+function withTimeout<T>(p: Promise<T>, ms = 500): Promise<T | null> {
+  return Promise.race([p.catch(() => null), new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))])
+}
+
 async function issueTokens(userId: string, email: string): Promise<TokenPair> {
   const accessToken = signAccessToken({ id: userId, email })
   const refreshToken = signRefreshToken({ id: userId, email })
   const expiresAt = parseDurationToDate(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d')
   await prisma.refreshToken.create({
-    data: { token: refreshToken, userId, expiresAt },
+    data: { token: hashToken(refreshToken), userId, expiresAt },
   })
   return { accessToken, refreshToken }
 }
@@ -121,19 +149,13 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 
 export async function logout(refreshToken: string): Promise<void> {
   await prisma.refreshToken.updateMany({
-    where: { token: refreshToken },
+    where: { token: { in: storedForms(refreshToken) } },
     data: { revoked: true },
   })
 }
 
 export async function refresh(refreshToken: string): Promise<TokenPair> {
-  const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } })
-
-  if (!stored || stored.revoked)
-    throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
-  if (stored.expiresAt < new Date())
-    throw new AppError('UNAUTHORIZED', 'Refresh token expired', 401)
-
+  // Check the signature first: a forged or expired token never reaches the database
   let payload: { id: string; email: string }
   try {
     payload = verifyRefreshToken(refreshToken)
@@ -141,10 +163,29 @@ export async function refresh(refreshToken: string): Promise<TokenPair> {
     throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
   }
 
-  await prisma.refreshToken.update({
-    where: { id: stored.id },
+  const hash = hashToken(refreshToken)
+  const stored = await prisma.refreshToken.findFirst({ where: { token: { in: storedForms(refreshToken) } } })
+  if (!stored || stored.expiresAt < new Date())
+    throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
+
+  if (stored.revoked) {
+    // Unknown (no mark, or Redis unreachable) is never treated as theft
+    const replacedAt = Number(await withTimeout(redis.get(replacedKey(hash))))
+    if (replacedAt > 0 && Date.now() - replacedAt > REPLACED_GRACE_MS) {
+      // Reuse of a replaced token: sign this account out everywhere
+      await prisma.refreshToken.updateMany({ where: { userId: stored.userId, revoked: false }, data: { revoked: true } })
+    }
+    throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
+  }
+
+  // Only one request can replace a token, even if two arrive together
+  const { count } = await prisma.refreshToken.updateMany({
+    where: { id: stored.id, revoked: false },
     data: { revoked: true },
   })
+  if (count === 0) throw new AppError('UNAUTHORIZED', 'Invalid refresh token', 401)
+  const lifeSec = Math.ceil((stored.expiresAt.getTime() - Date.now()) / 1000)
+  if (lifeSec > 0) await withTimeout(redis.set(replacedKey(hash), String(Date.now()), 'EX', lifeSec))
 
   return issueTokens(payload.id, payload.email)
 }
