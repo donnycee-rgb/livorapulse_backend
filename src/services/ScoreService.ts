@@ -251,7 +251,7 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
   const range = { gte: start, lt: end }
 
   const [physical, digital, productivity, mood, eco, nutrition, profile, streak] = await Promise.all([
-    prisma.physicalActivityEntry.findMany({ where: { userId, timestamp: range }, select: { steps: true, sleepMinutes: true } }),
+    prisma.physicalActivityEntry.findMany({ where: { userId, timestamp: range }, select: { steps: true, stepEquivalent: true, sleepMinutes: true } }),
     prisma.digitalUsageEntry.findMany({ where: { userId, date: range }, select: { screenTimeMinutes: true, categoryBreakdown: true } }),
     prisma.productivitySession.findMany({ where: { userId, startedAt: range }, select: { durationSec: true } }),
     prisma.moodLog.findMany({ where: { userId, timestamp: range }, select: { emoji: true, stressScore: true } }),
@@ -281,7 +281,8 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
   const goals = applyStreak(resolveGoals(profile), multiplier)
 
   // ── Raw totals ───────────────────────────────────────────────────────────
-  const totalSteps = physical.reduce((s, e) => s + e.steps, 0)
+  // Other activities (gym, football…) count toward the step goal through their step credit
+  const totalSteps = physical.reduce((s, e) => s + e.steps + e.stepEquivalent, 0)
   const totalSleepMin = physical.reduce((s, e) => s + e.sleepMinutes, 0)
   const focusMin = productivity.reduce((s, e) => s + e.durationSec, 0) / 60
   const totalCalories = nutrition.reduce((s, e) => s + e.calories, 0)
