@@ -92,7 +92,7 @@ export async function buildFeatures(userId: string, fromKey: string, toKey: stri
     prisma.moodLog.findMany({ where: { userId, timestamp: range }, select: { emoji: true, stressScore: true, timestamp: true } }),
     prisma.nutritionLog.findMany({ where: { userId, timestamp: range }, select: { mealType: true, calories: true, proteinG: true, timestamp: true } }),
     prisma.waterLog.findMany({ where: { userId, timestamp: range }, select: { glasses: true, timestamp: true } }),
-    prisma.ecoAction.findMany({ where: { userId, timestamp: range }, select: { impactKgCO2: true, timestamp: true } }),
+    prisma.ecoAction.findMany({ where: { userId, timestamp: range }, select: { category: true, type: true, impactKgCO2: true, timestamp: true } }),
     loadPeriods(userId),
   ])
 
