@@ -2,6 +2,7 @@ import { prisma } from '../db/prisma'
 import { addDays, dayBounds, dayKey, startOfDay } from '../utils/day'
 import { applyStreak, resolveGoals, type Goals } from './GoalService'
 import { computeStreak, getStreakMultiplier } from './StreakService'
+import { greenScore, isLowCarbon } from '../utils/green'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,7 @@ export function moodScore(logs: { emoji: string | null; stressScore: number | nu
   return feel * 0.6 + calm * 0.4
 }
 
+/** Older count-based eco score; the daily score now uses greenScore (utils/green.ts) */
 export function ecoScore(actionCount: number, goalEcoActions: number): number {
   return clamp((actionCount / goalEcoActions) * 100, 0, 100)
 }
@@ -255,9 +257,9 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     prisma.digitalUsageEntry.findMany({ where: { userId, date: range }, select: { screenTimeMinutes: true, categoryBreakdown: true } }),
     prisma.productivitySession.findMany({ where: { userId, startedAt: range }, select: { durationSec: true } }),
     prisma.moodLog.findMany({ where: { userId, timestamp: range }, select: { emoji: true, stressScore: true } }),
-    // Only actions that actually save CO₂ count — choosing "Driving" logs the
-    // transport mode with 0 kg saved and shouldn't raise the eco score
-    prisma.ecoAction.count({ where: { userId, timestamp: range, impactKgCO2: { gt: 0 } } }),
+    // Green habits (distinct, once a day) and trips; older entries of other
+    // kinds stay in history but don't count toward the new score
+    prisma.ecoAction.findMany({ where: { userId, timestamp: range, category: { in: ['HABIT', 'TRANSPORT'] } }, select: { category: true, type: true } }),
     prisma.nutritionLog.findMany({ where: { userId, timestamp: range }, select: { calories: true } }),
     prisma.userProfile.findUnique({
       where: { userId },
@@ -304,7 +306,7 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     digital: digital.length > 0,
     productivity: productivity.length > 0 || productiveMin > 0,
     mood: mood.length > 0,
-    eco: eco > 0,
+    eco: eco.length > 0,
     nutrition: nutrition.length > 0,
   }
 
@@ -314,7 +316,14 @@ export async function computeDailyScore(userId: string, date: Date | string = ne
     digital: logged.digital ? Math.round(digitalScore(screenMin, socialMin, entertainMin, productiveMin, goals)) : 0,
     productivity: logged.productivity ? Math.round(productivityScore(focusMin, productiveMin, goals.goalFocusMinutes)) : 0,
     mood: Math.round(moodScore(mood)),
-    eco: Math.round(ecoScore(eco, goals.goalEcoActionsPerDay)),
+    eco: Math.round(greenScore(
+      new Set(eco.filter((e) => e.category === 'HABIT').map((e) => e.type)).size,
+      goals.goalEcoActionsPerDay,
+      {
+        total: eco.filter((e) => e.category === 'TRANSPORT').length,
+        lowCarbon: eco.filter((e) => e.category === 'TRANSPORT' && isLowCarbon(e.type)).length,
+      },
+    )),
     nutrition: logged.nutrition ? Math.round(nutritionScore(totalCalories, goals.goalCaloriesPerDay)) : 0,
   }
 

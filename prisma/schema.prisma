@@ -152,10 +152,18 @@ model EcoAction {
   id          String   @id @default(cuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 'HABIT' (a green habit, once a day) or 'TRANSPORT' (a trip); older
+  /// entries may hold 'FOOD', 'ENERGY' or 'WASTE'
   category    String
+  /// The habit or the trip mode (see src/utils/green.ts)
   type        String
+  /// Trips only: CO₂ avoided compared with a car, worked out by the server
   impactKgCO2 Float
+  /// Trips only: roughly how far
+  distanceKm  Float?
   timestamp   DateTime @default(now())
+
+  @@index([userId, timestamp])
 }
 
 model DailySummary {

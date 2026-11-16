@@ -42,7 +42,7 @@ export interface RawDay {
   mood: { emoji: string | null; stressScore: number | null }[]
   nutrition: { mealType: string; calories: number; proteinG: number }[]
   water: { glasses: number }[]
-  eco: { impactKgCO2: number }[]
+  eco: { impactKgCO2: number; category?: string; type?: string }[]
 }
 
 export const emptyRawDay = (): RawDay => ({
@@ -121,7 +121,8 @@ export function buildDayFeatures(raw: RawDay, cycle: CycleDayInfo | null): DayFe
     caloriesIn: fullFoodDay ? sum(raw.nutrition.map((n) => n.calories)) : null,
     proteinG: fullFoodDay ? sum(raw.nutrition.map((n) => n.proteinG)) : null,
     waterGlasses: raw.water.length > 0 ? sum(raw.water.map((w) => w.glasses)) : null,
-    ecoActions: raw.eco.length > 0 ? raw.eco.filter((e) => e.impactKgCO2 > 0).length : null,
+    // Green actions: habits ticked plus low-carbon trips (older entries: those that saved CO₂)
+    ecoActions: raw.eco.length > 0 ? raw.eco.filter((e) => e.category === 'HABIT' || (e.category === 'TRANSPORT' ? e.type !== 'car' && e.impactKgCO2 > 0 : e.impactKgCO2 > 0)).length : null,
     cyclePhase: cycle?.phase ?? null,
     cycleDay: cycle?.cycleDay ?? null,
     symptoms: cycle?.symptoms ?? null,
