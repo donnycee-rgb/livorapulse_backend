@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { clientTime } from './clientTime'
 
 export const logNutritionSchema = z.object({
   mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
@@ -14,6 +15,8 @@ export const logNutritionSchema = z.object({
 
 export const logWaterSchema = z.object({
   glasses: z.number().int().positive().default(1),
+  /** When it was logged, for glasses saved offline and uploaded later */
+  timestamp: clientTime.optional(),
 })
 
 export type LogNutritionInput = z.infer<typeof logNutritionSchema>

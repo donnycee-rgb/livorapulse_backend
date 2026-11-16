@@ -9,6 +9,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { prisma } from './db/prisma'
 
 import { errorHandler } from './middleware/error'
+import { registerIdempotency } from './middleware/idempotency'
 import { AppError } from './utils/response'
 import { authRoutes } from './routes/auth'
 import { userRoutes } from './routes/user'
@@ -164,6 +165,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   })
 
   app.setErrorHandler(errorHandler)
+  registerIdempotency(app)
 
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 

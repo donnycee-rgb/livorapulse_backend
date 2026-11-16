@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { clientTime } from './clientTime'
 
 // A check-in records whichever answers the user actually gave. Sending only
 // one keeps the other null instead of filling it with a stale default.
@@ -12,6 +13,8 @@ export const createMoodSchema = z
       .max(10, 'Stress score must be at most 10')
       .optional(),
     note: z.string().optional(),
+    /** When it was logged, for check-ins saved offline and uploaded later */
+    timestamp: clientTime.optional(),
   })
   .refine((b) => b.emoji !== undefined || b.stressScore !== undefined, {
     message: 'Send a mood, a stress score, or both',

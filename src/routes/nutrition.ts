@@ -174,7 +174,9 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/nutrition/water — log water
   app.post('/water', async (request, reply) => {
     const body = validate(logWaterSchema, request.body)
-    const { start, end } = dayBounds(new Date())
+    // A glass saved offline counts on the day it was drunk
+    const at = body.timestamp ? new Date(body.timestamp) : new Date()
+    const { start, end } = dayBounds(at)
 
     const existing = await prisma.waterLog.findFirst({
       where: { userId: request.user!.id, timestamp: { gte: start, lt: end } },
@@ -189,7 +191,7 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const entry = await prisma.waterLog.create({
-      data: { userId: request.user!.id, glasses: body.glasses ?? 1 },
+      data: { userId: request.user!.id, glasses: body.glasses ?? 1, timestamp: at },
     })
     return reply.status(201).send({ success: true, data: entry })
   })

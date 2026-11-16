@@ -19,8 +19,10 @@ export async function moodRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id
     const select = { id: true, emoji: true, stressScore: true, note: true, timestamp: true }
 
+    // A check-in saved offline carries the time it was made
+    const at = body.timestamp ? new Date(body.timestamp) : new Date()
     const recent = await prisma.moodLog.findFirst({
-      where: { userId, timestamp: { gte: new Date(Date.now() - MERGE_WINDOW_MS) } },
+      where: { userId, timestamp: { gte: new Date(at.getTime() - MERGE_WINDOW_MS), lte: new Date(at.getTime() + MERGE_WINDOW_MS) } },
       orderBy: { timestamp: 'desc' },
       select: { id: true },
     })
@@ -39,7 +41,7 @@ export async function moodRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const log = await prisma.moodLog.create({
-      data: { userId, emoji: body.emoji, stressScore: body.stressScore, note: body.note },
+      data: { userId, emoji: body.emoji, stressScore: body.stressScore, note: body.note, timestamp: at },
       select,
     })
     return reply.status(201).send({ success: true, data: log })
