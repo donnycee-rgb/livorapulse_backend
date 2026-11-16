@@ -28,6 +28,7 @@ import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 import { flagRoutes } from './routes/flags'
 import { mlRoutes } from './routes/ml'
 import { frontendUrl } from './utils/frontendUrl'
+import { findUserIdByEmail, normalizeEmail } from './utils/email'
 
 /**
  * The secret that signs the Google sign-in session cookie. In production a
@@ -102,16 +103,18 @@ export async function buildApp(): Promise<FastifyInstance> {
       },
       async (_accessToken, _refreshToken, profile, done) => {
         try {
-          const email = profile.emails?.[0]?.value
+          const rawEmail = profile.emails?.[0]?.value
           const name = profile.displayName ?? 'User'
           const avatarUrl = profile.photos?.[0]?.value ?? null
 
-          if (!email) {
+          if (!rawEmail) {
             return done(new Error('No email returned from Google'), undefined)
           }
+          const email = normalizeEmail(rawEmail)
 
           // Find or create the user
-          let user = await prisma.user.findUnique({ where: { email } })
+          const existingId = await findUserIdByEmail(email)
+          let user = existingId ? await prisma.user.findUnique({ where: { id: existingId } }) : null
 
           if (!user) {
             user = await prisma.user.create({

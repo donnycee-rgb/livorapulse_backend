@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { forgotPassword, resetPassword, sendVerificationCode, verifyEmailCode } from '../src/services/AuthService'
-import { resetPasswordSchema, verifyEmailSchema } from '../src/schemas/auth.schema'
+import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema, verifyEmailSchema } from '../src/schemas/auth.schema'
 import { comparePassword } from '../src/utils/hash'
 
 // In-memory Redis, users and refresh tokens; emails are captured, not sent
@@ -48,6 +48,9 @@ vi.mock('../src/db/prisma', () => ({
     user: {
       findUnique: async ({ where }: { where: { id?: string; email?: string } }) =>
         [...s.users.values()].find((u) => (where.id ? u.id === where.id : u.email === where.email)) ?? null,
+      // Only used for a case-insensitive email match
+      findFirst: async ({ where }: { where: { email: { equals: string } } }) =>
+        [...s.users.values()].find((u) => u.email.toLowerCase() === where.email.equals.toLowerCase()) ?? null,
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => Object.assign(s.users.get(where.id)!, data),
     },
     refreshToken: {
@@ -177,5 +180,25 @@ describe('password reset', () => {
   it('rejects links that are not tokens, and short passwords', () => {
     expect(resetPasswordSchema.safeParse({ token: 'abc', password: 'long-enough' }).success).toBe(false)
     expect(resetPasswordSchema.safeParse({ token: 'a'.repeat(43), password: 'short' }).success).toBe(false)
+  })
+})
+
+describe('email capitals and spaces', () => {
+  it('are dropped from every email the app receives', () => {
+    expect(registerSchema.parse({ name: 'Amina', email: ' Amina@Example.TEST ', password: 'long-enough' }).email).toBe('amina@example.test')
+    expect(loginSchema.parse({ email: 'AMINA@example.test', password: 'x' }).email).toBe('amina@example.test')
+    expect(forgotPasswordSchema.parse({ email: 'Amina@Example.test ' }).email).toBe('amina@example.test')
+  })
+
+  it('do not stop a reset email being sent', async () => {
+    await forgotPassword('Amina@Example.TEST')
+    expect(s.sent.filter((m) => m.kind === 'reset')).toHaveLength(1)
+    expect(s.sent[0].params.to_email).toBe('amina@example.test')
+  })
+
+  it('still find an older account stored with capitals', async () => {
+    s.users.set('u2', { id: 'u2', name: 'Baraka', email: 'Baraka@Example.test', passwordHash: 'h', emailVerifiedAt: new Date() })
+    await forgotPassword('baraka@example.test')
+    expect(s.sent.at(-1)).toMatchObject({ kind: 'reset', params: { to_email: 'Baraka@Example.test' } })
   })
 })
