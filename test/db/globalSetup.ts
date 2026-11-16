@@ -30,12 +30,13 @@ export default async function setup(): Promise<() => Promise<void>> {
   // so Prisma mustn't cache prepared statements across them
   const url = `postgresql://postgres:postgres@127.0.0.1:${port}/postgres?sslmode=disable&connection_limit=1&pgbouncer=true`
   process.env.DATABASE_URL = url
+  process.env.DIRECT_URL = url // schema.prisma's directUrl, used by the migration below
   process.env.REDIS_URL ??= 'redis://127.0.0.1:6379' // imported by some modules; never needed by these tests
 
   // Async on purpose: the database runs in this process, so blocking it
   // (execFileSync) would leave it unable to answer the migration
   await promisify(execFile)(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['prisma', 'migrate', 'deploy'], {
-    env: { ...process.env, DATABASE_URL: url },
+    env: { ...process.env, DATABASE_URL: url, DIRECT_URL: url },
     shell: process.platform === 'win32',
   })
 

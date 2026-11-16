@@ -1,0 +1,6 @@
+# Runtime: the model and the nightly job
+numpy>=2.1
+psycopg[binary]>=3.2
+tzdata>=2024.1  # time zones on Windows and slim images
+# Development: tests
+pytest>=8.3

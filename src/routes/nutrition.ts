@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify'
-import { searchLocalFoods } from '../data/kenyanFoods'
+import { KENYAN_FOODS, searchLocalFoods } from '../data/kenyanFoods'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { logNutritionSchema, logWaterSchema } from '../schemas/nutrition.schema'
@@ -36,13 +36,18 @@ async function searchOpenFoodFacts(query: string): Promise<object[]> {
       .map((p: any) => {
         const n = p.nutriments
         const kcal = n['energy-kcal_100g'] ?? n['energy-kcal'] ?? 0
+        // Values are per 100 g. Report the serving weight so the app can scale
+        // them; without one, the serving is 100 g.
+        const servingGrams = Number(p.serving_quantity)
+        const hasServing = Number.isFinite(servingGrams) && servingGrams > 0
         return {
           name: p.product_name.trim(),
           calories: Math.round(kcal),
           proteinG: Math.round((n['proteins_100g'] ?? n['proteins'] ?? 0) * 10) / 10,
           carbsG: Math.round((n['carbohydrates_100g'] ?? n['carbohydrates'] ?? 0) * 10) / 10,
           fatG: Math.round((n['fat_100g'] ?? n['fat'] ?? 0) * 10) / 10,
-          servingSize: p.serving_size ?? '100g',
+          servingSize: hasServing ? (p.serving_size ?? `${servingGrams} g`) : '100 g',
+          servingGrams: hasServing ? servingGrams : 100,
         }
       })
   } catch {
@@ -53,7 +58,8 @@ async function searchOpenFoodFacts(query: string): Promise<object[]> {
 export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate)
 
-  // GET /api/nutrition/search?q=ugali — local DB first, then Open Food Facts
+  // GET /api/nutrition/search?q=ugali — local DB first, then Open Food Facts.
+  // Nutrition values are per 100 g; servingGrams is the weight of one serving.
   app.get('/search', async (request, reply) => {
     const { q } = request.query as { q?: string }
     if (!q || q.trim().length < 2) {
@@ -88,6 +94,17 @@ export async function nutritionRoutes(app: FastifyInstance): Promise<void> {
     const combined = [...localResults, ...globalMapped].slice(0, 10)
 
     return reply.send({ success: true, data: combined })
+  })
+
+  // GET /api/nutrition/local/:id — one food from the local database (used by
+  // photo scanning, which knows the food id). Values are per 100 g.
+  app.get('/local/:id', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const food = KENYAN_FOODS.find(f => f.id === id)
+    if (!food) {
+      return reply.status(404).send({ success: false, error: { message: 'Food not found' } })
+    }
+    return reply.send({ success: true, data: food })
   })
 
   // POST /api/nutrition — log a food entry

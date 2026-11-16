@@ -1,4 +1,4 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, preValidationHookHandler } from 'fastify'
 import FastifyPassport from '@fastify/passport'
 import { validate } from '../middleware/validate'
 import { authenticate } from '../middleware/authenticate'
@@ -13,11 +13,21 @@ import {
   resetPasswordSchema,
 } from '../schemas/auth.schema'
 import * as AuthService from '../services/AuthService'
+import { frontendUrl } from '../utils/frontendUrl'
 
 /** Tight rate limit applied to register and login to prevent brute-force. */
 const authRateLimit = { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+  // @fastify/passport types authenticate() as a route handler; it is an async
+  // (request, reply) function, which is what a preValidation hook is.
+  const googleSignIn = FastifyPassport.authenticate('google', {
+    scope: ['profile', 'email'],
+  }) as unknown as preValidationHookHandler
+  const googleCallback = FastifyPassport.authenticate('google', {
+    failureRedirect: `${frontendUrl()}/login?error=oauth_failed`,
+  }) as unknown as preValidationHookHandler
+
   // POST /api/auth/register
   app.post('/register', authRateLimit, async (request, reply) => {
     const body = validate(registerSchema, request.body)
@@ -95,7 +105,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/auth/google  — initiates OAuth flow
   app.get(
     '/google',
-    { preValidation: FastifyPassport.authenticate('google', { scope: ['profile', 'email'] }) },
+    { preValidation: googleSignIn },
     async () => {
       // Handler never runs — preValidation redirects to Google
     },
@@ -104,15 +114,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/auth/google/callback
   app.get(
     '/google/callback',
-    {
-      preValidation: FastifyPassport.authenticate('google', {
-        failureRedirect: `${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/login?error=oauth_failed`,
-      }),
-    },
+    { preValidation: googleCallback },
     async (request, reply) => {
       const oauthUser = request.user!
       const code = await AuthService.createLoginCode(oauthUser.id, oauthUser.email)
-      return reply.redirect(`${process.env.FRONTEND_URL ?? 'http://localhost:5173'}/dashboard?code=${code}`)
+      return reply.redirect(`${frontendUrl()}/dashboard?code=${code}`)
     },
   )
 }

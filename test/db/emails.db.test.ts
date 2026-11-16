@@ -25,7 +25,7 @@ describe('lowercase_emails migration', () => {
     const clashA = await user(`Clash-${run}@example.test`)
     const clashB = await user(`clash-${run}@example.test`)
 
-    const sql = readFileSync(path.join(__dirname, '../../prisma/migrations/20261016090000_lowercase_emails/migration.sql'), 'utf8')
+    const sql = readFileSync(path.join(__dirname, '../../prisma/migrations/20261117090000_lowercase_emails/migration.sql'), 'utf8')
     await prisma.$executeRawUnsafe(sql)
 
     expect(await emailOf(mixed)).toBe(`mixed-${run}@example.test`)

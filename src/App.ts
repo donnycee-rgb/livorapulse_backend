@@ -9,6 +9,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { prisma } from './db/prisma'
 
 import { errorHandler } from './middleware/error'
+import { AppError } from './utils/response'
 import { authRoutes } from './routes/auth'
 import { userRoutes } from './routes/user'
 import { onboardingRoutes } from './routes/onboarding'
@@ -25,7 +26,23 @@ import { insightRoutes } from './routes/insights'
 import { experimentRoutes } from './routes/experiments'
 import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 import { flagRoutes } from './routes/flags'
+import { mlRoutes } from './routes/ml'
+import { frontendUrl } from './utils/frontendUrl'
 import { findUserIdByEmail, normalizeEmail } from './utils/email'
+
+/**
+ * The secret that signs the Google sign-in session cookie. In production a
+ * missing secret stops the server rather than falling back to a value anyone
+ * can read in this public repository. Locally a fixed one is fine.
+ */
+export function sessionSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const secret = env.SESSION_SECRET
+  if (secret && secret.length >= 32) return secret
+  if (env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET must be set to a random value of at least 32 characters')
+  }
+  return 'local-development-session-secret-not-for-production'
+}
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -44,10 +61,8 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(helmet, { global: true })
 
-  const frontendUrl = (process.env.FRONTEND_URL ?? 'http://localhost:5173').replace(/\/$/, '')
-
   await app.register(cors, {
-    origin: frontendUrl,
+    origin: frontendUrl(),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
@@ -56,16 +71,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     global: true,
     max: 100,
     timeWindow: '1 minute',
-    errorResponseBuilder: () => ({
-      success: false,
-      error: { code: 'RATE_LIMITED', message: 'Too many requests — please slow down.' },
-    }),
+    // The plugin throws what this returns, so it must carry a status code:
+    // a plain object reached the error handler as an unknown error (a 500).
+    errorResponseBuilder: () => new AppError('RATE_LIMITED', 'Too many requests — please slow down.', 429),
   })
 
   // ── Cookie + Session (required by @fastify/passport) ──────────────────────
   await app.register(fastifyCookie)
   await app.register(fastifySession, {
-    secret: process.env.SESSION_SECRET ?? 'fallback-secret-change-in-production',
+    secret: sessionSecret(),
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
@@ -170,6 +184,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(summaryRoutes, { prefix: '/api/summary' })
   await app.register(sharedSummaryRoutes, { prefix: '/api/shared/summary' })
   await app.register(flagRoutes, { prefix: '/api/flags' })
+  await app.register(mlRoutes, { prefix: '/api/ml' })
 
   return app
 }
