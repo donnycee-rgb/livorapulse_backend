@@ -114,6 +114,8 @@ model UserProfile {
   hasDisability            Boolean   @default(false)
   disabilityNote           String?
   primaryGoal              String? // 'lose-weight' | 'gain-muscle' | 'better-sleep' | 'reduce-stress' | 'build-habits' | 'improve-fitness' | 'eco-lifestyle'
+  /// Every main goal chosen (1 to 3); the first is also kept in primaryGoal
+  goals                    String[]  @default([])
   onboardingComplete       Boolean   @default(false)
   // Calculated goals — stored so score system uses them
   goalStepsPerDay          Int?

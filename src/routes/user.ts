@@ -30,6 +30,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           select: {
             onboardingComplete: true,
             primaryGoal: true,
+            goals: true,
             goalStepsPerDay: true,
             goalSleepHours: true,
             goalScreenMinutes: true,
@@ -93,6 +94,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
             select: {
               onboardingComplete: true,
               primaryGoal: true,
+              goals: true,
               goalStepsPerDay: true,
               goalSleepHours: true,
               goalScreenMinutes: true,

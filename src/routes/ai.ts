@@ -42,7 +42,7 @@ async function buildUserContext(userId: string): Promise<string> {
   ] = await Promise.all([
     prisma.userProfile.findUnique({
       where: { userId },
-      select: { gender: true, primaryGoal: true, hasDisability: true, defaultCycleLength: true },
+      select: { gender: true, primaryGoal: true, goals: true, hasDisability: true, defaultCycleLength: true },
     }),
     prisma.physicalActivityEntry.findMany({
       where: { userId, timestamp: range },
@@ -169,7 +169,7 @@ You have full access to this user's real-time health data. Use it to give specif
 Today is ${today.toLocaleDateString('en-KE', { timeZone: APP_TIMEZONE, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
 
 USER PROFILE:
-  Primary goal: ${profile?.primaryGoal ?? 'not set'}
+  Main goals: ${profile?.goals?.length ? profile.goals.join(', ') : profile?.primaryGoal ?? 'not set'}
   Gender: ${profile?.gender ?? 'not specified'}
   ${profile?.hasDisability ? 'Has physical limitations/disability' : ''}
 

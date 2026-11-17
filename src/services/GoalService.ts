@@ -84,7 +84,8 @@ export interface OnboardingAnswers {
   heightCm?: number
   weightKg?: number
   hasDisability: boolean
-  primaryGoal: string
+  /** The main goals chosen (1 to 3) */
+  goals: string[]
   currentActivityLevel: string
   currentSleepHours: number
   currentScreenHours: number
@@ -110,7 +111,7 @@ function ageFrom(dateOfBirth?: string): number {
  * adjusted for the user's main goal. Falls back to 2,000 kcal when
  * weight, height or age is missing.
  */
-export function calculateCalorieGoal(a: Pick<OnboardingAnswers, 'dateOfBirth' | 'gender' | 'heightCm' | 'weightKg' | 'currentActivityLevel' | 'primaryGoal'>): number {
+export function calculateCalorieGoal(a: Pick<OnboardingAnswers, 'dateOfBirth' | 'gender' | 'heightCm' | 'weightKg' | 'currentActivityLevel' | 'goals'>): number {
   const age = ageFrom(a.dateOfBirth)
   if (!a.weightKg || !a.heightCm || !Number.isFinite(age) || age <= 0) return DEFAULT_GOALS.goalCaloriesPerDay
 
@@ -119,9 +120,13 @@ export function calculateCalorieGoal(a: Pick<OnboardingAnswers, 'dateOfBirth' | 
   const bmr = 10 * a.weightKg + 6.25 * a.heightCm - 5 * age + sexConstant
   let calories = bmr * (ACTIVITY_FACTOR[a.currentActivityLevel] ?? 1.375)
 
-  // No deficit for under-18s — they are still growing
-  if (a.primaryGoal === 'lose-weight' && age >= 18) calories -= 500
-  if (a.primaryGoal === 'gain-muscle') calories += 300
+  // No deficit for under-18s — they are still growing. Losing weight and
+  // gaining muscle together means eating at maintenance and training
+  // (body recomposition), so the two adjustments cancel out.
+  const lose = a.goals.includes('lose-weight') && age >= 18
+  const gain = a.goals.includes('gain-muscle')
+  if (lose && !gain) calories -= 500
+  if (gain && !lose) calories += 300
 
   const floor = a.gender === 'male' ? 1500 : a.gender === 'female' ? 1200 : 1350
   return clamp(roundTo(calories, 50), floor, GOAL_LIMITS.goalCaloriesPerDay[1])
@@ -129,6 +134,7 @@ export function calculateCalorieGoal(a: Pick<OnboardingAnswers, 'dateOfBirth' | 
 
 export function calculateGoals(a: OnboardingAnswers): Goals {
   const age = ageFrom(a.dateOfBirth)
+  const has = (g: string) => a.goals.includes(g)
 
   // Steps — from current activity, capped for age and disability
   const baseSteps: Record<string, number> = {
@@ -137,8 +143,9 @@ export function calculateGoals(a: OnboardingAnswers): Goals {
   let steps = baseSteps[a.currentActivityLevel] ?? 6000
   if (age > 60) steps = Math.min(steps, 6000)
   if (age < 18) steps = Math.min(steps, 8000)
-  if (a.primaryGoal === 'lose-weight') steps += 1000
-  if (a.primaryGoal === 'improve-fitness') steps += 2000
+  // The bigger of the two step boosts, not both
+  if (has('improve-fitness')) steps += 2000
+  else if (has('lose-weight')) steps += 1000
   if (a.hasDisability) steps = Math.min(steps, 3000)
 
   // Sleep — nudge toward a healthy range for the user's age
@@ -152,8 +159,8 @@ export function calculateGoals(a: OnboardingAnswers): Goals {
 
   // Screen time — 15% below today's habit, within sensible bounds
   let screen = clamp(Math.round(a.currentScreenHours * 60 * 0.85), 60, 300)
-  if (a.primaryGoal === 'reduce-stress') screen = Math.min(screen, 180)
-  if (a.primaryGoal === 'better-sleep') screen = Math.min(screen, 120)
+  if (has('reduce-stress')) screen = Math.min(screen, 180)
+  if (has('better-sleep')) screen = Math.min(screen, 120)
   screen = roundTo(screen, 15)
 
   // Social and entertainment limits are shares of the overall screen goal
@@ -166,11 +173,13 @@ export function calculateGoals(a: OnboardingAnswers): Goals {
     'reduce-stress': 45,
     'better-sleep': 45,
   }
-  const focus = focusByGoal[a.primaryGoal] ?? 60
+  // With several goals that set focus, the most ambitious one wins
+  const set = a.goals.filter((g) => g in focusByGoal).map((g) => focusByGoal[g])
+  const focus = set.length ? Math.max(...set) : 60
 
   const ecoBase: Record<string, number> = { rarely: 1, sometimes: 2, often: 3, always: 4 }
   let eco = ecoBase[a.ecoConsciousness] ?? 2
-  if (a.primaryGoal === 'eco-lifestyle') eco = Math.min(eco + 1, 5)
+  if (has('eco-lifestyle')) eco = Math.min(eco + 1, 5)
 
   return {
     goalStepsPerDay: roundTo(steps, 500),

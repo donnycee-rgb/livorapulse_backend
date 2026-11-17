@@ -31,6 +31,7 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
         hasDisability: body.hasDisability,
         disabilityNote: body.disabilityNote,
         primaryGoal: body.primaryGoal,
+        goals: body.goals,
         onboardingComplete: true,
         ...goals,
       },
@@ -43,12 +44,14 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
         hasDisability: body.hasDisability,
         disabilityNote: body.disabilityNote,
         primaryGoal: body.primaryGoal,
+        goals: body.goals,
         onboardingComplete: true,
         ...goals,
       },
       select: {
         onboardingComplete: true,
         primaryGoal: true,
+        goals: true,
         goalStepsPerDay: true,
         goalSleepHours: true,
         goalScreenMinutes: true,
@@ -74,6 +77,7 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
         weightKg: true,
         hasDisability: true,
         primaryGoal: true,
+        goals: true,
         onboardingComplete: true,
         goalStepsPerDay: true,
         goalSleepHours: true,
@@ -106,14 +110,14 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       heightCm: existing?.heightCm ?? undefined,
       weightKg,
       hasDisability: existing?.hasDisability ?? false,
-      primaryGoal: body.primaryGoal,
+      goals: body.goals,
       currentActivityLevel: body.currentActivityLevel,
       currentSleepHours: body.currentSleepHours,
       currentScreenHours: body.currentScreenHours,
       ecoConsciousness: body.ecoConsciousness,
     })
 
-    const data = { primaryGoal: body.primaryGoal, ...(weightKg !== undefined && { weightKg }), ...goals }
+    const data = { primaryGoal: body.primaryGoal, goals: body.goals, ...(weightKg !== undefined && { weightKg }), ...goals }
     await prisma.userProfile.upsert({
       where: { userId },
       create: { userId, onboardingComplete: true, ...data },
