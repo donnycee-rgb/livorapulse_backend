@@ -327,6 +327,7 @@ export async function getMe(userId: string): Promise<object> {
           onboardingComplete: true,
           primaryGoal: true,
           goals: true,
+          homeTown: true,
           gender: true,
           cycleTracking: true,
           dateOfBirth: true,

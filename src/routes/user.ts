@@ -31,6 +31,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
             onboardingComplete: true,
             primaryGoal: true,
             goals: true,
+            homeTown: true,
             goalStepsPerDay: true,
             goalSleepHours: true,
             goalScreenMinutes: true,
@@ -66,6 +67,9 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         where: { id: userId },
         data: {
           ...userUpdate,
+          ...(body.homeTown !== undefined
+            ? { profile: { upsert: { create: { homeTown: body.homeTown }, update: { homeTown: body.homeTown } } } }
+            : {}),
           ...(body.preferences
             ? {
                 preferences: {
@@ -95,6 +99,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
               onboardingComplete: true,
               primaryGoal: true,
               goals: true,
+              homeTown: true,
               goalStepsPerDay: true,
               goalSleepHours: true,
               goalScreenMinutes: true,
