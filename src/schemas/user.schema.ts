@@ -1,11 +1,16 @@
 import { z } from 'zod'
 
-/** A town id from the app's list ("kisumu", "nairobi"…), or "other" */
-export const townId = z.string().regex(/^[a-z][a-z-]{1,30}$/, 'Unknown town')
+/**
+ * Where the walking journey starts: a rough location (the app rounds it to
+ * ~1 km; it's used once and not stored), a town from the list, or clear.
+ */
+export const walkRouteSchema = z.union([
+  z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
+  z.object({ town: z.string().min(2).max(40) }),
+  z.object({ clear: z.literal(true) }),
+])
 
 export const updateProfileSchema = z.object({
-  /** Where the walking journey starts; null clears it */
-  homeTown: townId.nullable().optional(),
   name: z.string().min(2, 'Name must be at least 2 characters').optional(),
   avatarUrl: z.string().url('Invalid URL').optional(),
   preferences: z

@@ -37,7 +37,6 @@ const onboardingFields = z.object({
   weightKg: z.number().positive().optional(),
   hasDisability: z.boolean().default(false),
   disabilityNote: z.string().optional(),
-  homeTown: z.string().regex(/^[a-z][a-z-]{1,30}$/).optional(),
   ...goalFields,
   // Used to calculate goals — not stored directly. Defaults are typical values.
   currentSleepHours: z.number().min(0).max(24).default(7.5),
