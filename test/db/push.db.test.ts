@@ -112,3 +112,19 @@ describe('test notification', () => {
     expect(sent.at(-1)!.msg.title).toBe('Notifications are on')
   })
 })
+
+describe('the same sleep on every device', () => {
+  it('a sleep started on one device can be read by another, and ending it clears it everywhere', async () => {
+    const startedAt = new Date(Date.now() - 30 * 60000).toISOString()
+    await call(me, 'POST', '/sleep-session', { startedAt })
+    expect((await call(me, 'GET', '/sleep-session')).json().data.startedAt).toBe(startedAt)
+    await call(me, 'POST', '/sleep-session', { startedAt: null })
+    expect((await call(me, 'GET', '/sleep-session')).json().data.startedAt).toBeNull()
+  })
+
+  it('someone who never used it gets nothing running', async () => {
+    const fresh = await prisma.user.create({ data: { name: 'fresh', email: `fresh-${Date.now()}@example.test` } })
+    expect((await call(fresh, 'GET', '/sleep-session')).json().data.startedAt).toBeNull()
+    await prisma.user.delete({ where: { id: fresh.id } })
+  })
+})
