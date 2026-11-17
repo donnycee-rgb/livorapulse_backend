@@ -108,6 +108,9 @@ model PhysicalActivityEntry {
   sleepMinutes Int      @default(0)
   /// 'night' (last night: set or corrected, one per day) or 'nap' (each adds)
   sleepType    String?
+  /// When the person went to sleep and woke up, if they logged times (not just hours)
+  sleepStart   DateTime?
+  sleepEnd     DateTime?
   /// Another activity (gym, football…): what it was and for how long
   activityType String?
   durationMin  Int      @default(0)

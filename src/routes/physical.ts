@@ -18,6 +18,15 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
       id: true, steps: true, distanceKm: true, caloriesKcal: true,
       sleepMinutes: true, note: true, trail: true, timestamp: true,
       sleepType: true, activityType: true, durationMin: true, stepEquivalent: true,
+      sleepStart: true, sleepEnd: true,
+    }
+
+    // Sleep logged with times: the minutes come from the times, and it counts
+    // for the day the person woke up
+    const times = body.sleepStart && body.sleepEnd ? { sleepStart: new Date(body.sleepStart), sleepEnd: new Date(body.sleepEnd) } : null
+    if (times) {
+      body.sleepMinutes = Math.round((times.sleepEnd.getTime() - times.sleepStart.getTime()) / 60000)
+      body.timestamp = body.sleepEnd
     }
 
     // Last night's sleep is one value per day: setting it again corrects it
@@ -37,7 +46,7 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
       if (existing) {
         const entry = await prisma.physicalActivityEntry.update({
           where: { id: existing.id },
-          data: { sleepMinutes: body.sleepMinutes },
+          data: { sleepMinutes: body.sleepMinutes, sleepStart: times?.sleepStart ?? null, sleepEnd: times?.sleepEnd ?? null },
           select,
         })
         return reply.send({ success: true, data: entry })
@@ -61,6 +70,7 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
         caloriesKcal: activity ? activity.caloriesKcal : body.caloriesKcal,
         sleepMinutes: body.sleepMinutes,
         sleepType,
+        ...(sleepType && times ? times : {}),
         ...(activity ? { activityType: activity.activityType, durationMin: activity.durationMin, stepEquivalent: activity.stepEquivalent } : {}),
         note: body.note ?? null,
         trail: body.trail ? body.trail : undefined,
@@ -92,6 +102,8 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
           activityType: true,
           durationMin: true,
           stepEquivalent: true,
+          sleepStart: true,
+          sleepEnd: true,
         },
       }),
       physicalWeekly(userId),

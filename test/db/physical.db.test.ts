@@ -77,3 +77,33 @@ describe('other activities', () => {
     expect(result.components.physical).toBeGreaterThan(50)
   })
 })
+
+describe('sleep logged with times', () => {
+  const ago = (min: number) => new Date(Date.now() - min * 60000).toISOString()
+
+  it('works out the minutes from bedtime and wake-up, and corrects last night', async () => {
+    const res = await post({ ...base, sleepMinutes: 1, sleepType: 'night', sleepStart: ago(450), sleepEnd: ago(5) })
+    expect(res.statusCode).toBe(200) // last night already existed today: corrected, not added
+    expect(res.json().data).toMatchObject({ sleepMinutes: 445, sleepStart: expect.any(String), sleepEnd: expect.any(String) })
+    const nights = (await todaysEntries()).filter((e) => e.sleepType === 'night')
+    expect(nights).toHaveLength(1)
+    expect(nights[0].sleepMinutes).toBe(445)
+    expect(nights[0].sleepStart).toBeInstanceOf(Date)
+  })
+
+  it('a nap with times adds, and counts for the time it ended', async () => {
+    const before = (await todaysEntries()).length
+    const res = await post({ ...base, sleepMinutes: 0, sleepType: 'nap', sleepStart: ago(40), sleepEnd: ago(10) })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().data.sleepMinutes).toBe(30)
+    expect((await todaysEntries()).length).toBe(before + 1)
+  })
+
+  it('refuses times that make no sense', async () => {
+    expect((await post({ ...base, sleepType: 'night', sleepStart: ago(10), sleepEnd: ago(60) })).statusCode).toBe(400) // ends before it starts
+    expect((await post({ ...base, sleepType: 'night', sleepStart: ago(60) })).statusCode).toBe(400) // only one time
+    expect((await post({ ...base, sleepType: 'nap', sleepStart: ago(5), sleepEnd: ago(2) })).statusCode).toBe(400) // 3 minutes
+    expect((await post({ ...base, sleepType: 'night', sleepStart: ago(30), sleepEnd: new Date(Date.now() + 3 * 3600000).toISOString() })).statusCode).toBe(400) // future
+    expect((await post({ ...base, sleepType: 'night', sleepStart: ago(25 * 60), sleepEnd: ago(1) })).statusCode).toBe(400) // over 20 hours
+  })
+})
