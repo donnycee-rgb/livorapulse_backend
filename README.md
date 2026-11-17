@@ -67,6 +67,8 @@ Run the frontend alongside it; Vite forwards `/api` to port 4000.
 | `ANTHROPIC_API_KEY` | | AI coach. Without it the coach is unavailable |
 | `MAIL_RELAY_URL`, `MAIL_RELAY_SECRET` | prod | Email sending, see below |
 | `HEALTH_FLAGS_ENABLED` | | `false` until signed off |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | | Phone notifications (sleep reminders). Generate once with `npx web-push generate-vapid-keys`. Without them reminders are off |
+| `VAPID_SUBJECT` | | Contact for the push services, e.g. `mailto:you@example.com` |
 
 ---
 

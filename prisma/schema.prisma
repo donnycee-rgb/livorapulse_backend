@@ -35,6 +35,8 @@ model User {
   refreshTokens        RefreshToken[]
   cycleLogs            CycleLog[]
   periodDays           PeriodDay[]
+  pushSubscriptions    PushSubscription[]
+  reminderSettings     ReminderSettings?
   nutritionLogs        NutritionLog[]
   waterLogs            WaterLog[]
   dailyFeatures        DailyFeatures[]
@@ -55,6 +57,39 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime @default(now())
   revoked   Boolean  @default(false)
+}
+
+/// A phone or browser that has allowed notifications (Web Push)
+model PushSubscription {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}
+
+/// Sleep reminders sent as phone notifications (src/jobs/workers/reminders.ts)
+model ReminderSettings {
+  userId         String    @id
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The person's own time zone (from their phone), so 22:30 means their 22:30
+  timezone       String    @default("Africa/Nairobi")
+  /// Bedtime reminder, minutes after local midnight; null = off
+  bedtimeMinutes Int?
+  /// "Good morning, log your wake-up" while a sleep is running
+  wakeReminder   Boolean   @default(true)
+  /// A "Going to sleep" in progress (the app sends it), for the morning reminder
+  sleepStartedAt DateTime?
+  /// Local date (YYYY-MM-DD) the bedtime reminder was last sent, so it goes once a night
+  bedtimeSentOn  String?
+  /// The sleep the morning reminder was sent for, so it goes once per sleep
+  wakeSentFor    DateTime?
+  updatedAt      DateTime  @updatedAt
 }
 
 model UserPreferences {
@@ -99,27 +134,27 @@ model UserProfile {
 }
 
 model PhysicalActivityEntry {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  steps        Int      @default(0)
-  distanceKm   Float    @default(0)
-  caloriesKcal Int      @default(0)
-  sleepMinutes Int      @default(0)
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps          Int       @default(0)
+  distanceKm     Float     @default(0)
+  caloriesKcal   Int       @default(0)
+  sleepMinutes   Int       @default(0)
   /// 'night' (last night: set or corrected, one per day) or 'nap' (each adds)
-  sleepType    String?
+  sleepType      String?
   /// When the person went to sleep and woke up, if they logged times (not just hours)
-  sleepStart   DateTime?
-  sleepEnd     DateTime?
+  sleepStart     DateTime?
+  sleepEnd       DateTime?
   /// Another activity (gym, football…): what it was and for how long
-  activityType String?
-  durationMin  Int      @default(0)
+  activityType   String?
+  durationMin    Int       @default(0)
   /// That activity's credit toward the step goal (WHO: 1 min moderate ≈ 100
   /// steps, vigorous counts double). Kept apart from real steps.
-  stepEquivalent Int    @default(0)
-  trail        Json?
-  note         String?
-  timestamp    DateTime @default(now())
+  stepEquivalent Int       @default(0)
+  trail          Json?
+  note           String?
+  timestamp      DateTime  @default(now())
 }
 
 model DigitalUsageEntry {

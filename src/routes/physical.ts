@@ -29,6 +29,11 @@ export async function physicalRoutes(app: FastifyInstance): Promise<void> {
       body.timestamp = body.sleepEnd
     }
 
+    // A night logged with times ends any "Going to sleep" the reminders know about
+    if (times && body.sleepType !== 'nap') {
+      await prisma.reminderSettings.updateMany({ where: { userId, sleepStartedAt: { not: null } }, data: { sleepStartedAt: null } })
+    }
+
     // Last night's sleep is one value per day: setting it again corrects it
     // (7 h then 8 h ≠ 15 h). Naps are separate and each one adds.
     const isSleepOnly = body.sleepMinutes > 0 && body.steps === 0 && body.distanceKm === 0 && !body.activityType

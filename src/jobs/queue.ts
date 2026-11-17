@@ -44,6 +44,17 @@ export const insightsQueue = new Queue('insights', {
 })
 
 /**
+ * Queue for sleep reminders sent as phone notifications, every 5 minutes.
+ */
+export const remindersQueue = new Queue('reminders', {
+  connection,
+  defaultJobOptions: {
+    removeOnComplete: 20,
+    removeOnFail: 20,
+  },
+})
+
+/**
  * Register the scheduled jobs. Schedulers are upserted by id, so changing a
  * schedule here replaces the old one instead of adding a second copy.
  */
@@ -67,6 +78,12 @@ export async function registerRepeatableJobs(): Promise<void> {
     'nightly-insights',
     { pattern: '30 0 * * *', tz: APP_TIMEZONE },
     { name: 'dispatch-insights', data: {} },
+  )
+  // Every 5 minutes — bedtime and morning reminders
+  await remindersQueue.upsertJobScheduler(
+    'sleep-reminders',
+    { pattern: '*/5 * * * *', tz: APP_TIMEZONE },
+    { name: 'send-reminders', data: {} },
   )
   // Hourly — refresh the cached streaks
   await streaksQueue.upsertJobScheduler(
