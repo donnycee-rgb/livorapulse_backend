@@ -41,6 +41,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
             weightKg: true,
             hasDisability: true,
             gender: true,
+          cycleTracking: true,
             dateOfBirth: true,
           },
         },

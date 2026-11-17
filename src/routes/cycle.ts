@@ -1,9 +1,16 @@
 import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
-import { logCycleSchema, updateCycleSettingsSchema } from '../schemas/cycle.schema'
+import { daysQuerySchema, logCycleSchema, periodDaySchema, removeDaySchema, updateCycleSettingsSchema } from '../schemas/cycle.schema'
 import { addDays, dayKey } from '../utils/day'
 import { prisma } from '../db/prisma'
+import { cycleOverview, syncCycleLogs, toDate } from '../services/CycleService'
+import { addDaysKey, calendarMarks, cycleLengths, daysBetweenKeys } from '../utils/cycle'
+import { AppError } from '../utils/response'
+
+// The tracker works from logged period days (PeriodDay); the two helpers
+// below are the older start-date maths, still used by insights and the AI
+// coach through the CycleLog rows that are rebuilt from those days.
 
 // ---------------------------------------------------------------------------
 // Smart average — reads last 6 actual cycle lengths, drops outlier if 4+,
@@ -125,295 +132,137 @@ export function computeCyclePhase(
 export async function cycleRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate)
 
-  // POST /api/cycle — log a period start
-  app.post('/', async (request, reply) => {
-    const body = validate(logCycleSchema, request.body)
-    const userId = request.user!.id
+  /** A day may be logged up to today (one day of slack for time zones) */
+  const notFuture = (key: string) => {
+    if (key > addDaysKey(dayKey(), 1)) throw new AppError('VALIDATION_ERROR', "A period day can't be in the future", 400)
+  }
 
-    // Fetch previous period to calculate actual cycle length
-    const previous = await prisma.cycleLog.findFirst({
-      where: { userId },
-      orderBy: { periodStartDate: 'desc' },
-      select: { periodStartDate: true },
-    })
-
-    let actualCycleLength: number | null = null
-    if (previous) {
-      const gap = daysBetween(dayKey(previous.periodStartDate), dayKey(new Date(body.periodStartDate)))
-      // Only trust gaps between 15 and 60 days as valid cycle lengths
-      if (gap >= 15 && gap <= 60) actualCycleLength = gap
-    }
-
-    const entry = await prisma.cycleLog.create({
-      data: {
-        userId,
-        periodStartDate:  new Date(body.periodStartDate),
-        cycleLength:      body.cycleLength,
-        periodDuration:   body.periodDuration,
-        flowIntensity:    body.flowIntensity ?? null,
-        symptoms:         body.symptoms ?? [],
-        notes:            body.notes ?? null,
-        actualCycleLength,
-      },
-      select: {
-        id: true, periodStartDate: true, cycleLength: true,
-        periodDuration: true, flowIntensity: true, symptoms: true,
-        notes: true, actualCycleLength: true, createdAt: true,
-      },
-    })
-
-    return reply.status(201).send({ success: true, data: entry })
-  })
-
-  // GET /api/cycle — latest log + computed phase
+  // GET /api/cycle — today's place in the cycle, the next period, the averages
   app.get('/', async (request, reply) => {
     const userId = request.user!.id
-
-    const latest = await prisma.cycleLog.findFirst({
-      where: { userId },
-      orderBy: { periodStartDate: 'desc' },
-      select: {
-        id: true, periodStartDate: true, cycleLength: true,
-        periodDuration: true, flowIntensity: true, symptoms: true,
-        notes: true, actualCycleLength: true,
-      },
-    })
-
-    if (!latest) return reply.send({ success: true, data: null })
-
-    // Use smart average cycle length for phase calculation
-    const recentLogs = await prisma.cycleLog.findMany({
-      where: { userId },
-      orderBy: { periodStartDate: 'desc' },
-      take: 6,
-      select: { periodStartDate: true, periodDuration: true, actualCycleLength: true },
-    })
-
-    const profile = await prisma.userProfile.findUnique({
-      where: { userId },
-      select: { defaultCycleLength: true },
-    })
-    const { cycleLength: smartCycleLength, periodDuration: smartDuration } =
-      // Until there's enough history to average: the user's saved setting, then the length on the log
-      computeSmartAverage(recentLogs, profile?.defaultCycleLength ?? latest.cycleLength)
-
-    const cycleInfo = computeCyclePhase(
-      latest.periodStartDate,
-      smartCycleLength,
-      smartDuration,
-    )
-
+    const { status, stats } = await cycleOverview(userId)
+    if (!status) return reply.send({ success: true, data: null })
     return reply.send({
       success: true,
       data: {
-        ...latest,
-        ...cycleInfo,
-        smartCycleLength,
-        smartDuration,
+        ...status,
+        // names the Dashboard card already reads
+        periodStartDate: `${status.lastPeriodStart}T00:00:00.000Z`,
+        smartCycleLength: stats.cycleLength,
+        smartDuration: stats.periodLength,
+        spread: stats.spread,
+        cyclesUsed: stats.cyclesUsed,
       },
     })
   })
 
-  // GET /api/cycle/smart-average — returns the smart averaged values
-  app.get('/smart-average', async (request, reply) => {
+  // GET /api/cycle/days?from=&to= — logged days and calendar marks for a range
+  app.get('/days', async (request, reply) => {
     const userId = request.user!.id
-
-    // Also read saved defaults from user profile as fallback
-    const profile = await prisma.userProfile.findUnique({
-      where: { userId },
-      select: { defaultCycleLength: true, defaultPeriodDuration: true },
-    })
-
-    const logs = await prisma.cycleLog.findMany({
-      where: { userId },
-      orderBy: { periodStartDate: 'desc' },
-      take: 6,
-      select: { periodStartDate: true, periodDuration: true, actualCycleLength: true },
-    })
-
-    if (logs.length < 2) {
-      // Not enough data — use profile defaults or standard defaults
-      return reply.send({
-        success: true,
-        data: {
-          cycleLength:    profile?.defaultCycleLength    ?? 28,
-          periodDuration: profile?.defaultPeriodDuration ?? 5,
-          dataPoints: logs.length,
-          source: logs.length === 0 ? 'default' : 'single-log',
-        },
-      })
-    }
-
-    const { cycleLength, periodDuration } = computeSmartAverage(logs, profile?.defaultCycleLength)
-    return reply.send({
-      success: true,
-      data: {
-        cycleLength,
-        periodDuration,
-        dataPoints: logs.length,
-        source: 'smart-average',
-      },
-    })
+    const { from, to } = validate(daysQuerySchema, request.query)
+    if (daysBetweenKeys(from, to) < 0 || daysBetweenKeys(from, to) > 120) throw new AppError('VALIDATION_ERROR', 'Ask for at most 120 days', 400)
+    const today = dayKey()
+    const { days, periods, stats } = await cycleOverview(userId, today)
+    const inRange = days.filter((d) => d.date >= from && d.date <= to)
+    const marks = calendarMarks(periods, stats, new Set(days.map((d) => d.date)), from, to, today)
+    return reply.send({ success: true, data: { days: inRange, marks } })
   })
 
-  // GET /api/cycle/history — last 6 cycles with full data
+  // POST /api/cycle/days — set a period day (flow, symptoms, notes). One row per day.
+  app.post('/days', async (request, reply) => {
+    const userId = request.user!.id
+    const body = validate(periodDaySchema, request.body)
+    notFuture(body.date)
+    const data = {
+      flow: body.flow ?? null,
+      symptoms: body.symptoms ?? [],
+      notes: body.notes ?? null,
+    }
+    const row = await prisma.periodDay.upsert({
+      where: { userId_date: { userId, date: toDate(body.date) } },
+      create: { userId, date: toDate(body.date), ...data },
+      update: data,
+      select: { date: true, flow: true, symptoms: true, notes: true },
+    })
+    await syncCycleLogs(userId)
+    return reply.send({ success: true, data: { ...row, date: body.date } })
+  })
+
+  // POST /api/cycle/days/remove — this wasn't a period day after all
+  app.post('/days/remove', async (request, reply) => {
+    const userId = request.user!.id
+    const { date } = validate(removeDaySchema, request.body)
+    await prisma.periodDay.deleteMany({ where: { userId, date: toDate(date) } })
+    await syncCycleLogs(userId)
+    return reply.send({ success: true })
+  })
+
+  // GET /api/cycle/history — periods, newest first, with the cycle each began
   app.get('/history', async (request, reply) => {
     const userId = request.user!.id
-
-    const logs = await prisma.cycleLog.findMany({
-      where: { userId },
-      orderBy: { periodStartDate: 'desc' },
-      take: 6,
-      select: {
-        id: true, periodStartDate: true, cycleLength: true,
-        periodDuration: true, flowIntensity: true, symptoms: true,
-        notes: true, actualCycleLength: true, createdAt: true,
-      },
+    const { periods, stats } = await cycleOverview(userId)
+    const lengths = periods.map((p, i) => {
+      const next = periods[i + 1]
+      const gap = next ? daysBetweenKeys(p.start, next.start) : null
+      return gap !== null && gap >= 15 && gap <= 60 ? gap : null
     })
-
-    return reply.send({ success: true, data: logs })
+    const data = periods.map((p, i) => ({ ...p, cycleLength: lengths[i] })).reverse().slice(0, 12)
+    return reply.send({ success: true, data: { periods: data, stats, cycles: cycleLengths(periods).length } })
   })
 
-  // GET /api/cycle/calendar?year=2026&month=3 — all events for a month
-  app.get('/calendar', async (request, reply) => {
+  // GET /api/cycle/settings — the person's usual cycle and whether tracking is on
+  app.get('/settings', async (request, reply) => {
     const userId = request.user!.id
-    const { year, month } = request.query as { year?: string; month?: string }
-
-    const y = parseInt(year  ?? String(new Date().getFullYear()), 10)
-    const m = parseInt(month ?? String(new Date().getMonth() + 1), 10)
-
-    // Get all logs to build calendar
-    const logs = await prisma.cycleLog.findMany({
-      where: { userId },
-      orderBy: { periodStartDate: 'asc' },
-      select: {
-        periodStartDate: true, cycleLength: true,
-        periodDuration: true, actualCycleLength: true,
+    const p = await prisma.userProfile.findUnique({ where: { userId }, select: { defaultCycleLength: true, defaultPeriodDuration: true, cycleTracking: true, gender: true } })
+    return reply.send({
+      success: true,
+      data: {
+        cycleLength: p?.defaultCycleLength ?? 28,
+        periodDuration: p?.defaultPeriodDuration ?? 5,
+        tracking: p?.cycleTracking ?? p?.gender === 'female',
       },
     })
-
-    if (logs.length === 0) return reply.send({ success: true, data: { events: [] } })
-
-    const recentLogs = [...logs].reverse().slice(0, 6)
-    const { cycleLength: smartCycle, periodDuration: smartDuration } =
-      computeSmartAverage(recentLogs, recentLogs[0]?.cycleLength)
-
-    // Build day-by-day events map for the requested month ± 1 month buffer
-    const events: Record<string, {
-      type: 'period' | 'fertile' | 'ovulation' | 'predicted-period' | 'predicted-fertile' | 'predicted-ovulation'
-      logged: boolean
-    }> = {}
-
-    const tag = (date: Date, type: typeof events[string]['type'], logged: boolean) => {
-      const key = date.toISOString().split('T')[0]
-      // Don't overwrite a higher-priority event (period > ovulation > fertile)
-      const priority: Record<string, number> = {
-        'period': 5, 'predicted-period': 4,
-        'ovulation': 3, 'predicted-ovulation': 3,
-        'fertile': 2, 'predicted-fertile': 1,
-      }
-      if (!events[key] || priority[type] > priority[events[key].type]) {
-        events[key] = { type, logged }
-      }
-    }
-
-    // Mark all logged periods
-    logs.forEach((log, idx) => {
-      const start = new Date(log.periodStartDate)
-      start.setHours(0, 0, 0, 0)
-
-      // Period days
-      for (let d = 0; d < log.periodDuration; d++) {
-        const day = new Date(start)
-        day.setDate(start.getDate() + d)
-        tag(day, 'period', true)
-      }
-
-      // Ovulation and fertile window for this cycle
-      const oDay = log.cycleLength - 14
-      const fertStart = Math.max(oDay - 4, log.periodDuration + 1)
-
-      for (let d = fertStart - 1; d < oDay - 1; d++) {
-        const day = new Date(start)
-        day.setDate(start.getDate() + d)
-        tag(day, 'fertile', true)
-      }
-      const ovDay = new Date(start)
-      ovDay.setDate(start.getDate() + oDay - 1)
-      tag(ovDay, 'ovulation', true)
-    })
-
-    // Project future predictions from the last logged period
-    const lastLog = logs[logs.length - 1]
-    const lastStart = new Date(lastLog.periodStartDate)
-    lastStart.setHours(0, 0, 0, 0)
-
-    // Project 3 cycles into the future
-    for (let cycle = 1; cycle <= 3; cycle++) {
-      const predStart = new Date(lastStart)
-      predStart.setDate(lastStart.getDate() + smartCycle * cycle)
-
-      // Predicted period days
-      for (let d = 0; d < smartDuration; d++) {
-        const day = new Date(predStart)
-        day.setDate(predStart.getDate() + d)
-        tag(day, 'predicted-period', false)
-      }
-
-      // Predicted fertile + ovulation
-      const oDay = smartCycle - 14
-      const fertStart = Math.max(oDay - 4, smartDuration + 1)
-      for (let d = fertStart - 1; d < oDay - 1; d++) {
-        const day = new Date(predStart)
-        day.setDate(predStart.getDate() + d)
-        tag(day, 'predicted-fertile', false)
-      }
-      const ovDay = new Date(predStart)
-      ovDay.setDate(predStart.getDate() + oDay - 1)
-      tag(ovDay, 'predicted-ovulation', false)
-    }
-
-    // Filter to the requested month
-    const startOfMonth = new Date(y, m - 1, 1)
-    const endOfMonth   = new Date(y, m, 0)
-
-    const filtered = Object.entries(events)
-      .filter(([key]) => {
-        const d = new Date(key)
-        return d >= startOfMonth && d <= endOfMonth
-      })
-      .map(([date, ev]) => ({ date, ...ev }))
-
-    return reply.send({ success: true, data: { events: filtered, smartCycleLength: smartCycle } })
   })
 
-  // PUT /api/cycle/settings — save default cycle length and duration to profile
+  // PUT /api/cycle/settings — usual cycle and period length, tracking on/off
   app.put('/settings', async (request, reply) => {
     const userId = request.user!.id
-    // A cycle length of 0 would break every phase calculation
     const body = validate(updateCycleSettingsSchema.partial(), request.body)
-
     await prisma.userProfile.upsert({
       where: { userId },
       create: {
         userId,
-        defaultCycleLength:    body.cycleLength    ?? 28,
+        defaultCycleLength: body.cycleLength ?? 28,
         defaultPeriodDuration: body.periodDuration ?? 5,
+        cycleTracking: body.tracking,
       },
       update: {
-        defaultCycleLength:    body.cycleLength,
+        defaultCycleLength: body.cycleLength,
         defaultPeriodDuration: body.periodDuration,
+        cycleTracking: body.tracking,
       },
     })
-
+    if (body.cycleLength !== undefined) await syncCycleLogs(userId)
     return reply.send({ success: true })
   })
 
-  // DELETE /api/cycle/:id
-  app.delete('/:id', async (request, reply) => {
-    const { id } = request.params as { id: string }
+  // POST /api/cycle — an older app version's "my period started on …":
+  // becomes that day plus the usual number of days after it
+  app.post('/', async (request, reply) => {
     const userId = request.user!.id
-    await prisma.cycleLog.deleteMany({ where: { id, userId } })
-    return reply.send({ success: true })
+    const body = validate(logCycleSchema, request.body)
+    const start = new Date(body.periodStartDate).toISOString().slice(0, 10)
+    notFuture(start)
+    for (let i = 0; i < body.periodDuration; i++) {
+      const date = toDate(addDays(start, i))
+      const first = i === 0
+      await prisma.periodDay.upsert({
+        where: { userId_date: { userId, date } },
+        create: { userId, date, flow: first ? body.flowIntensity ?? null : null, symptoms: first ? body.symptoms ?? [] : [], notes: first ? body.notes ?? null : null },
+        update: {},
+      })
+    }
+    await syncCycleLogs(userId)
+    return reply.status(201).send({ success: true })
   })
 }

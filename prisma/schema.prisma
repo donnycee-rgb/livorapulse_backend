@@ -34,6 +34,7 @@ model User {
   dailySummaries       DailySummary[]
   refreshTokens        RefreshToken[]
   cycleLogs            CycleLog[]
+  periodDays           PeriodDay[]
   nutritionLogs        NutritionLog[]
   waterLogs            WaterLog[]
   dailyFeatures        DailyFeatures[]
@@ -91,6 +92,8 @@ model UserProfile {
   // Cycle defaults — saved from settings, used as fallback when < 2 cycles logged
   defaultCycleLength       Int?
   defaultPeriodDuration    Int?
+  /// Show the cycle tracker. null = the default: on for women, off for everyone else
+  cycleTracking            Boolean?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 }
@@ -185,6 +188,24 @@ model DailySummary {
   @@unique([userId, date])
 }
 
+/// One day of a period, as the person logged it. The source of truth for the
+/// cycle tracker; CycleLog rows are rebuilt from these (src/services/CycleService.ts).
+model PeriodDay {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  flow      String? // 'spotting' | 'light' | 'medium' | 'heavy'
+  symptoms  Json? // string[]
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+/// One period, summarised from its PeriodDay rows (rebuilt on every change).
+/// Health flags, insights, the AI coach and the health summary read these.
 model CycleLog {
   id                String   @id @default(cuid())
   userId            String
