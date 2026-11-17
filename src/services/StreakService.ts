@@ -34,7 +34,7 @@ async function activeDayKeys(userId: string, asOf: string): Promise<Set<string>>
     prisma.ecoAction.findMany({ where: { userId, timestamp: range }, select: { timestamp: true } }),
     prisma.nutritionLog.findMany({ where: { userId, timestamp: range }, select: { timestamp: true } }),
     prisma.waterLog.findMany({ where: { userId, timestamp: range }, select: { timestamp: true } }),
-    prisma.cycleLog.findMany({ where: { userId, createdAt: range }, select: { createdAt: true } }),
+    prisma.periodDay.findMany({ where: { userId, createdAt: range }, select: { createdAt: true } }),
   ])
 
   const keys = new Set<string>()
