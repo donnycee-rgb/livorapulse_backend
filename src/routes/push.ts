@@ -83,6 +83,12 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, data: await settingsFor(userId) })
   })
 
+  // GET /api/push/sleep-session — a sleep in progress, so every device shows the same banner
+  app.get('/sleep-session', async (request, reply) => {
+    const r = await prisma.reminderSettings.findUnique({ where: { userId: request.user!.id }, select: { sleepStartedAt: true } })
+    return reply.send({ success: true, data: { startedAt: r?.sleepStartedAt?.toISOString() ?? null } })
+  })
+
   // POST /api/push/sleep-session — "Going to sleep" tapped (startedAt), or ended (null)
   app.post('/sleep-session', async (request, reply) => {
     const userId = request.user!.id
