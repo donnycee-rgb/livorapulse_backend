@@ -1,23 +1,43 @@
 import { z } from 'zod'
 
-// Setup after sign-up. Only the main goal is required — every other answer
+export const MAIN_GOALS = [
+  'lose-weight',
+  'gain-muscle',
+  'better-sleep',
+  'reduce-stress',
+  'build-habits',
+  'improve-fitness',
+  'eco-lifestyle',
+] as const
+const mainGoal = z.enum(MAIN_GOALS)
+type MainGoal = (typeof MAIN_GOALS)[number]
+
+/**
+ * The main goals: `goals` (1 to 3, in the order chosen) from this app, or a
+ * single `primaryGoal` from older versions. Both arrive as `goals`, with
+ * `primaryGoal` the first one.
+ */
+const goalFields = {
+  primaryGoal: mainGoal.optional(),
+  goals: z.array(mainGoal).min(1).max(3).optional(),
+}
+function withGoals<T extends { primaryGoal?: MainGoal; goals?: MainGoal[] }>(b: T) {
+  const goals = [...new Set(b.goals ?? (b.primaryGoal ? [b.primaryGoal] : []))]
+  return { ...b, goals, primaryGoal: goals[0] }
+}
+const hasGoal = (b: { primaryGoal?: string; goals?: string[] }) => !!(b.goals?.length || b.primaryGoal)
+const needGoal = { message: 'Choose at least one goal', path: ['goals'] }
+
+// Setup after sign-up. Only the main goals are required — every other answer
 // can be skipped and falls back to standard targets.
-export const onboardingSchema = z.object({
+const onboardingFields = z.object({
   dateOfBirth: z.string().datetime().optional(),
   gender: z.enum(['male', 'female', 'non-binary', 'prefer-not-to-say']).optional(),
   heightCm: z.number().positive().optional(),
   weightKg: z.number().positive().optional(),
   hasDisability: z.boolean().default(false),
   disabilityNote: z.string().optional(),
-  primaryGoal: z.enum([
-    'lose-weight',
-    'gain-muscle',
-    'better-sleep',
-    'reduce-stress',
-    'build-habits',
-    'improve-fitness',
-    'eco-lifestyle',
-  ]),
+  ...goalFields,
   // Used to calculate goals — not stored directly. Defaults are typical values.
   currentSleepHours: z.number().min(0).max(24).default(7.5),
   currentActivityLevel: z.enum(['sedentary', 'light', 'moderate', 'active', 'very-active']).default('light'),
@@ -27,6 +47,8 @@ export const onboardingSchema = z.object({
   currentStress: z.enum(['very-calm', 'mild', 'moderate', 'high', 'burned-out']).optional(),
   ecoConsciousness: z.enum(['rarely', 'sometimes', 'often', 'always']).default('sometimes'),
 })
+
+export const onboardingSchema = onboardingFields.refine(hasGoal, needGoal).transform(withGoals)
 
 export type OnboardingInput = z.infer<typeof onboardingSchema>
 
@@ -45,14 +67,15 @@ export const updateGoalsSchema = z.object({
 export type UpdateGoalsInput = z.infer<typeof updateGoalsSchema>
 
 // Weekly check-in — the answers that drive goals, re-asked so goals keep up with the user
-export const checkInSchema = onboardingSchema.pick({
+export const checkInSchema = onboardingFields.pick({
   primaryGoal: true,
+  goals: true,
   currentActivityLevel: true,
   currentSleepHours: true,
   currentScreenHours: true,
   ecoConsciousness: true,
 }).extend({
   weightKg: z.number().min(20).max(350).optional(),
-})
+}).refine(hasGoal, needGoal).transform(withGoals)
 
 export type CheckInInput = z.infer<typeof checkInSchema>
