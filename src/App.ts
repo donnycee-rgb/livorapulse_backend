@@ -28,6 +28,7 @@ import { experimentRoutes } from './routes/experiments'
 import { sharedSummaryRoutes, summaryRoutes } from './routes/summary'
 import { flagRoutes } from './routes/flags'
 import { mlRoutes } from './routes/ml'
+import { pushRoutes } from './routes/push'
 import { frontendUrl } from './utils/frontendUrl'
 import { findUserIdByEmail, normalizeEmail } from './utils/email'
 
@@ -187,6 +188,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(sharedSummaryRoutes, { prefix: '/api/shared/summary' })
   await app.register(flagRoutes, { prefix: '/api/flags' })
   await app.register(mlRoutes, { prefix: '/api/ml' })
+  await app.register(pushRoutes, { prefix: '/api/push' })
 
   return app
 }
