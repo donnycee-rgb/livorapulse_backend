@@ -161,15 +161,27 @@ describe('summary PDF', () => {
     insights: ['After nights with under 6h of sleep, your stress that day averages 3.4 instead of 2.5 (out of 5). Based on 31 days.'],
   }))
 
-  it('renders a one-page PDF', async () => {
+  const pages = (pdf: Buffer) => pdf.toString('latin1').match(/\/Type \/Page\b/g)?.length
+
+  it('the measures on page 1; cycle, things to discuss and patterns on page 2', async () => {
     const pdf = await renderSummaryPdf(full)
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
-    expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)).toHaveLength(1)
+    expect(pages(pdf)).toBe(2)
+  })
+
+  it('one page when there is no cycle, nothing to discuss and no patterns', async () => {
+    expect(pages(await renderSummaryPdf({ ...full, cycle: null, insights: [], flags: [] }))).toBe(1)
   })
 
   it('puts the notes on their own page', async () => {
     const pdf = await renderSummaryPdf({ ...full, notes: [{ date: '2026-09-20', area: 'Mood', text: 'Exams this week 😩' }] })
-    expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)).toHaveLength(2)
+    expect(pages(pdf)).toBe(3)
+  })
+
+  it('draws charts from the daily values, and still works for links shared before they existed', async () => {
+    expect(full.sleep.daily).toHaveLength(91)
+    const old = { ...full, sleep: { ...full.sleep, daily: undefined }, mood: { ...full.mood, daily: undefined } }
+    expect(pages(await renderSummaryPdf(old))).toBe(2)
   })
 
   it('keeps accented letters and drops what the built-in fonts cannot print', () => {
