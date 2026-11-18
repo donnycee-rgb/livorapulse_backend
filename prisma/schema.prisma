@@ -116,6 +116,10 @@ model UserProfile {
   primaryGoal              String? // 'lose-weight' | 'gain-muscle' | 'better-sleep' | 'reduce-stress' | 'build-habits' | 'improve-fitness' | 'eco-lifestyle'
   /// Every main goal chosen (1 to 3); the first is also kept in primaryGoal
   goals                    String[]  @default([])
+  /// Walking journey: where it starts ("Kondele", "near Thika") and its stops [{ name, km }],
+  /// built once from a rough location or a chosen town (the location itself is never stored)
+  walkArea                 String?
+  walkRoute                Json?
   onboardingComplete       Boolean   @default(false)
   // Calculated goals — stored so score system uses them
   goalStepsPerDay          Int?
