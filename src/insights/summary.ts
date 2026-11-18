@@ -29,6 +29,8 @@ export interface MetricSummary {
   min: number | null
   max: number | null
   weekly: WeekValue[]
+  /** Every day of the period in order (null = not logged), for charts. Missing in links shared before it was added */
+  daily?: (number | null)[]
   /** Second half of the period vs the first; null with too little data */
   trend: 'higher' | 'lower' | 'steady' | null
   /** Nights under 6 h, mood ≤ 2, stress ≥ 4 — null for walks */
@@ -141,6 +143,7 @@ function summarizeMetric(key: MetricKey, keys: string[], byDate: Map<string, Fea
     min: values.length > 0 ? Math.min(...values) : null,
     max: values.length > 0 ? Math.max(...values) : null,
     weekly,
+    daily: keys.map(valueOn),
     trend,
     notableDays: spec.notable ? values.filter(spec.notable).length : null,
   }
