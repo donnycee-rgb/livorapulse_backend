@@ -1,3 +1,4 @@
+import { earlyLook, type EarlyLook } from '../insights/early'
 import type { Insight } from '@prisma/client'
 import { prisma } from '../db/prisma'
 import {
@@ -178,6 +179,11 @@ export interface InsightStatus {
   areas: { area: FeatureKey; label: string; days: number }[]
   /** The tests closest to having enough data, nearest first */
   nextUp: { key: string; label: string; pairedDays: number; daysNeeded: number; message: string }[]
+}
+
+/** "Your days so far": the person's own numbers before any pattern is tested */
+export async function insightEarlyLook(userId: string, today: string = dayKey()): Promise<EarlyLook> {
+  return earlyLook(await windowDays(userId, today))
 }
 
 export async function insightStatus(userId: string, today: string = dayKey()): Promise<InsightStatus> {

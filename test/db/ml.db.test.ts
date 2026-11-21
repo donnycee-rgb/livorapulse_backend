@@ -63,8 +63,9 @@ describe('GET /api/ml/mood', () => {
     const { data } = (await get(me)).json()
     expect(data.effects.map((e: { feature: string }) => e.feature)).toEqual(['sleepHours', 'socialHours', 'stepsK'])
     expect(data.effects.every((e: { claim: string }) => e.claim !== 'unclear')).toBe(true)
-    expect(data.moodDays).toBe(21)
+    expect(data.moodDays).toBe(0) // counted from the daily table, where this test logged none
     expect(data.minMoodDays).toBe(5)
+    expect(data.waitingFor).toBeNull() // results are there
   })
 
   it("gives today's forecast, not an older one", async () => {
@@ -79,6 +80,23 @@ describe('GET /api/ml/mood', () => {
     expect(data.effects).toEqual([])
     expect(data.forecast).toBeNull()
     expect(data.moodDays).toBe(0)
+    expect(data.waitingFor).toBe('you')
+  })
+
+  it('counts mood days from the daily table, and says plainly what it is waiting for', async () => {
+    // 7 days with mood logged
+    await prisma.dailyFeatures.createMany({
+      data: Array.from({ length: 7 }, (_, i) => ({ userId: other.id, date: startOfDay(addDays(today, -1 - i)), moodValue: 3 + (i % 2) })),
+    })
+    // the last run succeeded but had nothing for them yet: tonight's run will
+    let data = (await get(other)).json().data
+    expect(data.moodDays).toBe(7)
+    expect(data.waitingFor).toBe('tonight')
+
+    // the last run was skipped because too few people are logging yet
+    await prisma.mlModelRun.create({ data: { modelVersion: 'mood-hbr-1', status: 'skipped', startedAt: new Date(Date.now() + 1000), finishedAt: new Date(Date.now() + 2000) } })
+    data = (await get(other)).json().data
+    expect(data.waitingFor).toBe('people')
   })
 
   it("re-forecasts with last night's sleep once it's logged", async () => {
