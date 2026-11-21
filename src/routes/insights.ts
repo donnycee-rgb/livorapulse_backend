@@ -3,7 +3,7 @@ import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
 import { insightFeedbackSchema, insightIdParamsSchema } from '../schemas/insights.schema'
 import { prisma } from '../db/prisma'
-import { activeInsights, insightStatus, toView } from '../services/InsightService'
+import { activeInsights, insightStatus, insightEarlyLook, toView } from '../services/InsightService'
 import { AppError } from '../utils/response'
 
 export async function insightRoutes(app: FastifyInstance): Promise<void> {
@@ -18,6 +18,11 @@ export async function insightRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/insights/status — how much data the user has, and how much more they need
   app.get('/status', async (request, reply) => {
     return reply.send({ success: true, data: await insightStatus(request.user!.id) })
+  })
+
+  // GET /api/insights/early — the person's own numbers so far (no patterns, nothing estimated)
+  app.get('/early', async (request, reply) => {
+    return reply.send({ success: true, data: await insightEarlyLook(request.user!.id) })
   })
 
   // POST /api/insights/:id/feedback — "useful" or "not true for me"

@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
 import { prisma } from '../db/prisma'
-import { dayKey, startOfDay } from '../utils/day'
+import { addDays, dayKey, startOfDay } from '../utils/day'
 import { liveMoodForecast } from '../services/MoodForecast'
 
 // Results of the nightly mood model (written by the Python job in ml/).
@@ -10,6 +10,8 @@ import { liveMoodForecast } from '../services/MoodForecast'
 const OUTCOME = 'mood'
 /** Mood days a user needs before the model publishes anything for them (ml/livora_ml/job.py) */
 const MIN_MOOD_DAYS = 5
+/** The model reads this many days back (ml/livora_ml/job.py) */
+const MODEL_WINDOW_DAYS = 180
 
 export async function mlRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authenticate)
@@ -19,7 +21,7 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
     const userId = request.user!.id
     const today = dayKey()
 
-    const [effects, prediction, lastRun, live] = await Promise.all([
+    const [effects, prediction, lastRun, live, moodDays] = await Promise.all([
       prisma.mlUserEffect.findMany({
         where: { userId, outcome: OUTCOME, claim: { in: ['personal', 'typical'] } },
         select: { feature: true, unit: true, mean: true, sd: true, probPositive: true, claim: true, nDays: true, updatedAt: true },
@@ -38,7 +40,19 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
         request.log.warn({ err }, 'live mood forecast failed; using the nightly one')
         return null
       }),
+      // Days with mood logged, from the same daily table the model reads
+      prisma.dailyFeatures.count({
+        where: { userId, moodValue: { not: null }, date: { gte: startOfDay(addDays(today, -MODEL_WINDOW_DAYS)) } },
+      }),
     ])
+
+    // Why there's nothing to show yet, in a way the app can say plainly:
+    // 'you' (more mood days needed), 'people' (the model learns from everyone
+    // and is waiting for enough people), 'tonight' (ready, runs overnight)
+    const waitingFor = effects.length > 0 ? null
+      : moodDays < MIN_MOOD_DAYS ? 'you'
+      : lastRun?.status === 'skipped' ? 'people'
+      : 'tonight'
 
     // Personal patterns first, then the clearest ones (effect relative to its uncertainty)
     effects.sort((a, b) =>
@@ -49,7 +63,8 @@ export async function mlRoutes(app: FastifyInstance): Promise<void> {
       success: true,
       data: {
         minMoodDays: MIN_MOOD_DAYS,
-        moodDays: effects[0]?.nDays ?? prediction?.nDays ?? 0,
+        moodDays,
+        waitingFor,
         effects: effects.map(({ nDays: _n, ...e }) => e),
         forecast: live
           ? { date: today, mean: live.mean, lower: live.lower, upper: live.upper, usesSleep: live.usesSleep }
