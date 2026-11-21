@@ -76,3 +76,38 @@ describe('averages and predictions', () => {
     expect(marks['2026-10-07']).toBeUndefined() // past cycles stay plain
   })
 })
+
+describe('ending a period early', () => {
+  const days = period('2026-11-01', 3) // logged 1 to 3 Nov
+  const periods = groupPeriods(days)
+  const s = cycleStats(periods, '2026-11-04', {})
+
+  it('without a word, the day after the last logged day still counts as the period', () => {
+    expect(cycleStatus(periods, s, '2026-11-04')!.periodActive).toBe(true)
+  })
+
+  it('once she says it ended, it stops on its last logged day', () => {
+    const st = cycleStatus(periods, s, '2026-11-04', '2026-11-03')!
+    expect(st).toMatchObject({ periodActive: false, lastPeriodEnd: '2026-11-03' })
+    expect(st.phase).not.toBe('menstrual')
+  })
+
+  it('ending it on the last day it was logged, that day is over too', () => {
+    expect(cycleStatus(periods, s, '2026-11-03', '2026-11-03')).toMatchObject({ periodActive: false, phase: 'follicular' })
+  })
+
+  it('a day logged after the marker reopens it', () => {
+    const more = groupPeriods([...days, day('2026-11-05')])
+    expect(cycleStatus(more, cycleStats(more, '2026-11-05', {}), '2026-11-05', '2026-11-03')!.periodActive).toBe(true)
+  })
+
+  it('an old marker never ends the next period', () => {
+    const next = groupPeriods([...days, ...period('2026-11-29', 2)])
+    expect(cycleStatus(next, cycleStats(next, '2026-11-30', {}), '2026-11-30', '2026-11-03')!.periodActive).toBe(true)
+  })
+
+  it('an ended period counts towards the usual period length straight away', () => {
+    expect(cycleStats(periods, '2026-11-04', { periodLength: 6 }).periodLength).toBe(6)
+    expect(cycleStats(periods, '2026-11-04', { periodLength: 6 }, '2026-11-03').periodLength).toBe(3)
+  })
+})

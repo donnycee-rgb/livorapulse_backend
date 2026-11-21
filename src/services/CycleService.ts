@@ -17,8 +17,8 @@ export async function loadDays(userId: string): Promise<PeriodDayInput[]> {
 }
 
 export async function loadDefaults(userId: string) {
-  const p = await prisma.userProfile.findUnique({ where: { userId }, select: { defaultCycleLength: true, defaultPeriodDuration: true } })
-  return { cycleLength: p?.defaultCycleLength ?? null, periodLength: p?.defaultPeriodDuration ?? null }
+  const p = await prisma.userProfile.findUnique({ where: { userId }, select: { defaultCycleLength: true, defaultPeriodDuration: true, periodEndedOn: true } })
+  return { cycleLength: p?.defaultCycleLength ?? null, periodLength: p?.defaultPeriodDuration ?? null, endedOn: p?.periodEndedOn ? keyOf(p.periodEndedOn) : null }
 }
 
 /**
@@ -53,7 +53,7 @@ export async function syncCycleLogs(userId: string): Promise<void> {
 export async function cycleOverview(userId: string, today = dayKey()) {
   const [days, defaults] = await Promise.all([loadDays(userId), loadDefaults(userId)])
   const periods = groupPeriods(days)
-  const stats = cycleStats(periods, today, defaults)
-  const status = cycleStatus(periods, stats, today)
+  const stats = cycleStats(periods, today, defaults, defaults.endedOn)
+  const status = cycleStatus(periods, stats, today, defaults.endedOn)
   return { days, periods, stats, status }
 }

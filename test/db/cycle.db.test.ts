@@ -114,3 +114,32 @@ describe('migration', () => {
     expect(days[1].flow).toBeNull()
   })
 })
+
+describe('my period ended', () => {
+  const ended = (u: U, payload: object) => app.inject({ method: 'POST', url: '/api/cycle/period-ended', headers: auth(u), payload })
+  let u: U
+  beforeAll(async () => {
+    u = await prisma.user.create({ data: { name: 'ended', email: `ended-${Date.now()}@example.test`, profile: { create: { onboardingComplete: true, gender: 'female' } } } })
+    for (const n of [3, 2, 1]) await logDay(u, { date: ago(n), flow: 'light' })
+  })
+  afterAll(async () => { await prisma.user.deleteMany({ where: { id: u.id } }) })
+
+  it('stops the period on every device, and can be taken back', async () => {
+    expect((await get(u, '/api/cycle')).json().data).toMatchObject({ periodActive: true, lastPeriodEnd: ago(1) })
+    expect((await ended(u, { lastDay: ago(1) })).statusCode).toBe(200)
+    expect((await get(u, '/api/cycle')).json().data.periodActive).toBe(false)
+    expect((await ended(u, { ended: false })).statusCode).toBe(200)
+    expect((await get(u, '/api/cycle')).json().data.periodActive).toBe(true)
+  })
+
+  it('logging today after saying it ended reopens it', async () => {
+    await ended(u, { lastDay: ago(1) })
+    await logDay(u, { date: today, flow: 'spotting' })
+    expect((await get(u, '/api/cycle')).json().data.periodActive).toBe(true)
+  })
+
+  it('refuses a future day and bad input', async () => {
+    expect((await ended(u, { lastDay: addDays(today, 5) })).statusCode).toBe(400)
+    expect((await ended(u, { ended: true })).statusCode).toBe(400)
+  })
+})

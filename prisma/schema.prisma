@@ -135,6 +135,8 @@ model UserProfile {
   defaultPeriodDuration    Int?
   /// Show the cycle tracker. null = the default: on for women, off for everyone else
   cycleTracking            Boolean?
+  /// The last day of a period the person said had ended (a later logged day reopens it)
+  periodEndedOn            DateTime?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 }
