@@ -59,6 +59,9 @@ export function cycleLengths(periods: Period[]): number[] {
   return out
 }
 
+/** The person said this period ended: their marker is on or after its last logged day */
+export const isEnded = (p: Period, endedOn: string | null) => endedOn !== null && endedOn >= p.end && endedOn >= p.start
+
 export type CycleStats = {
   /** Expected cycle length (days) */
   cycleLength: number
@@ -76,7 +79,7 @@ export type CycleStats = {
  * the standard deviation, at least 1 day, at most 7; with fewer than 3 real
  * cycles it's 3 days, since there isn't enough to know better.
  */
-export function cycleStats(periods: Period[], today: string, defaults: { cycleLength?: number | null; periodLength?: number | null }): CycleStats {
+export function cycleStats(periods: Period[], today: string, defaults: { cycleLength?: number | null; periodLength?: number | null }, endedOn: string | null = null): CycleStats {
   let lengths = cycleLengths(periods).slice(-6)
   if (lengths.length >= 4) {
     const mean = lengths.reduce((s, v) => s + v, 0) / lengths.length
@@ -85,7 +88,7 @@ export function cycleStats(periods: Period[], today: string, defaults: { cycleLe
     lengths = lengths.filter((_, i) => i !== far)
   }
   // Period lengths from finished periods only (one still going isn't over yet)
-  const finished = periods.filter((p) => daysBetweenKeys(p.end, today) >= 2).slice(-6).map((p) => p.days)
+  const finished = periods.filter((p) => daysBetweenKeys(p.end, today) >= 2 || isEnded(p, endedOn)).slice(-6).map((p) => p.days)
 
   const cycleLength = lengths.length ? Math.round(lengths.reduce((s, v) => s + v, 0) / lengths.length) : (defaults.cycleLength ?? 28)
   const periodLength = finished.length ? Math.round(finished.reduce((s, v) => s + v, 0) / finished.length) : (defaults.periodLength ?? 5)
@@ -102,6 +105,8 @@ export type Phase = 'menstrual' | 'follicular' | 'ovulation' | 'luteal'
 
 export type CycleStatus = {
   lastPeriodStart: string
+  /** Last logged day of that period */
+  lastPeriodEnd: string
   dayOfCycle: number
   phase: Phase
   periodActive: boolean
@@ -121,8 +126,10 @@ export type CycleStatus = {
  * Where today falls. Ovulation is taken as 14 days before the next
  * expected period (the common estimate), the fertile window as the 5 days
  * before it plus the day itself. "Late" only after the latest date in the range.
+ * A period counts as still going the day after its last logged day (it may
+ * just not be logged yet), unless the person said it ended (`endedOn`).
  */
-export function cycleStatus(periods: Period[], stats: CycleStats, today: string): CycleStatus | null {
+export function cycleStatus(periods: Period[], stats: CycleStats, today: string, endedOn: string | null = null): CycleStatus | null {
   const last = periods[periods.length - 1]
   if (!last) return null
   const dayOfCycle = daysBetweenKeys(last.start, today) + 1
@@ -130,10 +137,11 @@ export function cycleStatus(periods: Period[], stats: CycleStats, today: string)
   const latest = addDaysKey(next, stats.spread)
   const ovulationDay = Math.max(2, stats.cycleLength - 14)
   const fertileWindowStart = Math.max(ovulationDay - 5, 1)
-  const periodActive = daysBetweenKeys(last.end, today) <= 1 && dayOfCycle <= last.days + 1 && dayOfCycle <= 10
+  const ended = isEnded(last, endedOn)
+  const periodActive = !ended && daysBetweenKeys(last.end, today) <= 1 && dayOfCycle <= last.days + 1 && dayOfCycle <= 10
 
   let phase: Phase
-  if (periodActive || dayOfCycle <= Math.max(last.days, 1)) phase = 'menstrual'
+  if (periodActive || (!ended && dayOfCycle <= Math.max(last.days, 1))) phase = 'menstrual'
   else if (dayOfCycle < ovulationDay - 1) phase = 'follicular'
   else if (dayOfCycle <= ovulationDay + 1) phase = 'ovulation'
   else phase = 'luteal'
@@ -141,6 +149,7 @@ export function cycleStatus(periods: Period[], stats: CycleStats, today: string)
   const daysLate = Math.max(0, daysBetweenKeys(latest, today))
   return {
     lastPeriodStart: last.start,
+    lastPeriodEnd: last.end,
     dayOfCycle,
     phase,
     periodActive,

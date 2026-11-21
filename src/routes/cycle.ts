@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { authenticate } from '../middleware/authenticate'
 import { validate } from '../middleware/validate'
-import { daysQuerySchema, logCycleSchema, periodDaySchema, removeDaySchema, updateCycleSettingsSchema } from '../schemas/cycle.schema'
+import { daysQuerySchema, logCycleSchema, periodDaySchema, periodEndedSchema, removeDaySchema, updateCycleSettingsSchema } from '../schemas/cycle.schema'
 import { addDays, dayKey } from '../utils/day'
 import { prisma } from '../db/prisma'
 import { cycleOverview, syncCycleLogs, toDate } from '../services/CycleService'
@@ -194,6 +194,24 @@ export async function cycleRoutes(app: FastifyInstance): Promise<void> {
     const { date } = validate(removeDaySchema, request.body)
     await prisma.periodDay.deleteMany({ where: { userId, date: toDate(date) } })
     await syncCycleLogs(userId)
+    return reply.send({ success: true })
+  })
+
+  // POST /api/cycle/period-ended — "my period ended": it stops showing as
+  // going on. Logging a later day of the same period reopens it.
+  app.post('/period-ended', async (request, reply) => {
+    const userId = request.user!.id
+    const body = validate(periodEndedSchema, request.body)
+    let endedOn: Date | null = null
+    if ('lastDay' in body) {
+      notFuture(body.lastDay)
+      endedOn = toDate(body.lastDay)
+    }
+    await prisma.userProfile.upsert({
+      where: { userId },
+      create: { userId, periodEndedOn: endedOn },
+      update: { periodEndedOn: endedOn },
+    })
     return reply.send({ success: true })
   })
 
